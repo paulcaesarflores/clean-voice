@@ -104,6 +104,7 @@ class FakeBackend:
         self._listed = list(present)
         self.opened: list[FakeStreams] = []
         self.rescans = 0
+        self.rescan_times: list[float] = []  # time.monotonic() of each rescan
         self.rescans_while_open = 0
         self.mic_value = 0.1
         self.fail_open: str | None = None
@@ -122,6 +123,7 @@ class FakeBackend:
             self.rescans_while_open += 1  # the engine catches the assertion below, so the tests check this count
         assert all(s.closed for s in self.opened), "rescan while a stream is open"
         self.rescans += 1
+        self.rescan_times.append(time.monotonic())
         self._listed = list(self.present)
 
     def inputs(self) -> list[Device]:
@@ -594,11 +596,14 @@ def test_device_error_is_reported_and_retried_without_empty_backups(make_engine)
 # ------------------------------------------------------------------ device unplug (J05 Step 4)
 
 
-def test_no_device_listing_while_audio_runs(make_engine) -> None:
+def test_no_device_listing_while_audio_runs(make_engine, monkeypatch: pytest.MonkeyPatch) -> None:
     # D1 (docs/simple-clean-mic-audio-report.md, cause 5): listing devices disturbed drivers in the original app.
     # engine-obs r1, F1: also while echo removal retries for speakers every RETRY_S (the default output is the cable,
     # as VB-CABLE's installer often leaves it), each try only asks for the default endpoint. That the real backend's
     # query lists nothing is test_the_default_speakers_are_found_without_listing_devices.
+    # Echo removal is Windows only, so on a Mac it never retries (CI run 43368578097: 0 queries); its retry logic is the
+    # same everywhere, so run it here on both. The default output is the cable, so no AEC3 is ever created.
+    monkeypatch.setattr(engine_module, "echo_platform_reason", lambda: None)
     engine, backend = make_engine([MIC, CABLE, SPEAKERS])
     backend.default_out = CABLE
     engine.start(MIC.name)
@@ -606,13 +611,12 @@ def test_no_device_listing_while_audio_runs(make_engine) -> None:
     engine.set_echo(True)
     wait_for(lambda: engine.status().echo is engine_module.EchoState.UNAVAILABLE)
     rescans, queries = backend.rescans, backend.speaker_queries
-    time.sleep(2.0)
+    wait_for(lambda: backend.speaker_queries - queries >= 5)  # the retry path really ran: it asked for the default
     engine.refresh()  # the window asks for a fresh list when the dropdown opens; ignored while running
     time.sleep(0.3)
     assert engine.status().state is State.ON
     assert backend.rescans == rescans
     assert backend.rescans_while_open == 0
-    assert backend.speaker_queries - queries >= 5  # the retry path really ran: it asked for the default each time
 
 
 def test_a_missing_mic_is_retried_every_retry_interval(make_engine) -> None:
@@ -625,11 +629,15 @@ def test_a_missing_mic_is_retried_every_retry_interval(make_engine) -> None:
     wait_for(lambda: engine.status().state is State.MIC_LOST)
     rescans = backend.rescans
     states = set()
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline:
+    # Waits for the retries rather than counting them in a fixed second: the macOS runner's timed waits ran late
+    # enough that only 2 fitted (CI run 43368578097). What the engine controls is checked: never sooner than retry_s.
+    deadline = time.monotonic() + 10.0
+    while backend.rescans - rescans < 3 and time.monotonic() < deadline:
         states.add(engine.status().state)
         time.sleep(0.02)
     assert backend.rescans - rescans >= 3
+    gaps = [b - a for a, b in pairwise(backend.rescan_times[rescans - 1 :])]
+    assert all(0.2 - 1e-6 <= gap < 1.0 for gap in gaps), gaps  # every retry interval: not sooner, and it keeps retrying
     assert states == {State.MIC_LOST}
     assert backend.rescans_while_open == 0
 
@@ -677,23 +685,28 @@ def test_a_cable_stall_keeps_the_mic_and_the_backup(make_engine) -> None:
     # OBS audit I-4a: each WASAPI source has its own capture thread and reconnect (win-wasapi.cpp:1091-1224, :959-993),
     # so one device failing never stops another. A cable stall (its format changed in Sound settings, another app took
     # it exclusively) used to close the mic too, leaving a hole of the stall + watchdog + retry in the backup.
+    # The backup is measured against what the mic delivered, not the wall clock: the fake mic's 10 ms sleeps ran ~4x
+    # long on the macOS runner, so it delivered 0.27 s in 1.22 s (CI run 43368578097) and the backup had all of it.
     engine, backend = make_engine([MIC, CABLE])
     engine.start(MIC.name)
     wait_for(lambda: engine.status().state is State.ON)
     first = backend.opened[0]
-    time.sleep(1.0)
-    t0 = time.monotonic()
-    rec0 = engine.status().recording_seconds
+    path = engine._path
+    assert path is not None
+    wait_for(lambda: engine.status().recording_seconds > 0.5)
+    mic0, rec0 = path.in_ring.total_written, engine.status().recording_seconds
     backend.present.remove(CABLE)  # the cable stops calling back; the mic does not
     wait_for(lambda: engine.status().state is State.CABLE_LOST)
+    mic_at_stall = path.in_ring.total_written
     backend.present.append(CABLE)
     wait_for(lambda: engine.status().state is State.ON)
+    assert path.in_ring.total_written > mic_at_stall, "the mic stopped delivering while the cable was down"
     time.sleep(0.5)
     recorded = engine.status().recording_seconds - rec0
-    wall = time.monotonic() - t0
+    delivered = (path.in_ring.total_written - mic0) / 48_000
     assert not first.closed, "the mic stream (and so the backup) was stopped by a cable-only stall"
-    assert len(backend.opened) == 1  # the mic was never reopened
-    assert recorded >= wall - 0.15, f"the backup grew {recorded:.2f} s in {wall:.2f} s"
+    assert len(backend.opened) == 1 and engine._path is path  # the mic was never reopened
+    assert recorded >= delivered - 0.15, f"the backup got {recorded:.2f} s of the {delivered:.2f} s the mic delivered"
     played = engine.status().counters.underruns
     wait_for(lambda: backend.streams_of("output", CABLE) and backend.streams_of("output", CABLE)[-1].calls > 20)
     assert engine.status().counters.underruns <= played + 1  # the reopened cable plays the voice again

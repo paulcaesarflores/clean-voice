@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import platform
 import re
 import sys
 import wave
@@ -147,11 +148,16 @@ def test_background_noise_is_clearly_reduced_on_real_speech(noise: str) -> None:
 # removed gate). audio_check reports these as "gate dip"; they are pinned here, from the strength they appear at:
 # (noise, level) -> (from strength, time s, longest ms). The fan's 16.89 s dip at the normal level crosses the 10 dB
 # line at strength 100 since the per-sample compressor (OBS audit I-2); at the quiet level it did from strength 70.
+# At the normal level and strength 70 it sits on the line: 9.91 dB down on x86-64, where RNNoise 0.2 runs its network
+# with the SSE kernels (src/vec_avx.h: activations quantised to unsigned 8 bits, _mm_rcp_ps), and just past 10 dB on
+# Apple silicon, where it runs the NEON ones (src/vec_neon.h: signed 8 bits, the coarser vrecpeq_f32). Same -O2 build,
+# no fast-math; the same dip at the same place and length (CI run 43368578097, macOS arm64), so arm64 pins it from 70.
+ARM64 = platform.machine().lower() in ("arm64", "aarch64")
 RNNOISE_DIPS = {
     (HUM, -26.0): (70.0, 1.12, 60),
     (HUM, -38.0): (70.0, 1.09, 90),
     (FAN, -38.0): (70.0, 16.89, 50),
-    (FAN, -26.0): (100.0, 16.89, 50),
+    (FAN, -26.0): (70.0 if ARM64 else 100.0, 16.89, 50),
 }
 
 

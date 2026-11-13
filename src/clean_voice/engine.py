@@ -769,15 +769,18 @@ class Engine:
         self._last_out = (0, now)
         self._cable_down = False
         # A retry after the mic was lost says ON only once the reopened mic delivers: a dead mic that opens but never
-        # calls back would otherwise show "On" for FIRST_AUDIO_S of every retry (engine-obs r2, n5).
-        retrying = self._status.state is State.MIC_LOST
+        # calls back would otherwise show "On" for FIRST_AUDIO_S of every retry (engine-obs r2, n5). A retry after an
+        # error keeps showing the error the same way: an audio step that fails every time showed "On" from here until
+        # it failed again (CI run 43368578097).
+        prior = self._status.state
+        retrying = prior in (State.MIC_LOST, State.ERROR)
         self._await_mic = retrying
         log.info("audio on: %s -> %s", mic.name, cable.name)
         self._update(
-            state=State.MIC_LOST if retrying else State.ON,
+            state=prior if retrying else State.ON,
             mic=mic.name,
             output=cable.name,
-            error=None,
+            error=self._status.error if prior is State.ERROR else None,
             recording=recorder is not None and recorder.active,
             recording_error=self._recording_error(),
             **({"recording_files": (recorder.clean.path, recorder.raw.path)} if recorder else {}),
@@ -798,7 +801,7 @@ class Engine:
             self._last_in = (written, now)
             if self._await_mic:
                 self._await_mic = False
-                self._update(state=State.CABLE_LOST if self._cable_down else State.ON)
+                self._update(state=State.CABLE_LOST if self._cable_down else State.ON, error=None)
         if callbacks != self._last_out[0]:
             self._last_out = (callbacks, now)
         recorder = self._recorder

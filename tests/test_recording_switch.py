@@ -144,8 +144,17 @@ def test_a_failing_audio_step_never_ends_the_worker(make_engine, monkeypatch: py
     engine, backend = make_engine([MIC, CABLE])
     engine.start(MIC.name)
     wait_for(lambda: engine.status().state is State.ERROR)
-    time.sleep(0.5)  # a few retries, each failing again
-    assert engine._thread.is_alive() and engine.status().error == "audio step failure"
+    # A few retries, each failing again, and the screen says so throughout: each retry used to show "On" (error None)
+    # from opening the streams until the failing step closed them again (CI run 43368578097 read it there).
+    opened, seen = len(backend.opened), set()
+    deadline = time.monotonic() + 10.0
+    while len(backend.opened) < opened + 3 and time.monotonic() < deadline:
+        status = engine.status()
+        seen.add((status.state, status.error))
+        time.sleep(0.001)
+    assert len(backend.opened) >= opened + 3
+    assert seen == {(State.ERROR, "audio step failure")}
+    assert engine._thread.is_alive()
     broken[0] = False
     wait_for(lambda: engine.status().state is State.ON, timeout=15)  # retried, and running again
     assert engine._thread.is_alive() and voice_flows(backend)

@@ -9,6 +9,7 @@ import pytest
 from drift_sim import SimTime, simulate
 from test_engine import CABLE, CABLE_REC, HEADPHONES, MIC, SPEAKERS, VOICEMEETER, wait_for
 
+import clean_voice.engine as engine_module
 from clean_voice.audio_path import MIC_TEST_S, SAMPLE_RATE, AudioPath, MicTestState
 from clean_voice.devices import Device, monitor_device
 from clean_voice.dsp import PassThrough
@@ -183,7 +184,9 @@ def test_slow_speaker_streams_never_hold_up_the_voice(make_engine) -> None:
         longest = max(longest, now - last[1])
         time.sleep(0.005)
     assert longest < 0.15, f"the worker stood still for {longest * 1000:.0f} ms"
-    wait_for(lambda: len(backend.streams_of("loopback")) == 1 and engine.status().monitor)
+    # Echo removal opens the loopback on Windows only; on a Mac it is unavailable and never opens one (DESIGN).
+    loopbacks = 1 if engine_module.echo_platform_reason() is None else 0
+    wait_for(lambda: len(backend.streams_of("loopback")) == loopbacks and engine.status().monitor)
 
 
 # ------------------------------------------------------------------ Test your mic
@@ -297,7 +300,9 @@ def test_hear_myself_resumes_after_a_mic_test(make_engine) -> None:
     wait_for(lambda: engine.status().mic_test is MicTestState.RECORDING)
     path.mic_test.recorded = path.mic_test.buffer.shape[0] - 4800
     wait_for(lambda: engine.status().mic_test is MicTestState.PLAYING)
-    wait_for(lambda: engine.status().mic_test is MicTestState.IDLE, timeout=15)
+    # The playback moves one block per fake mic block: 5.1 s of them, whose 10 ms sleeps ran ~4x long on the macOS
+    # runner (CI run 43368578097), so the wait allows for a slow machine.
+    wait_for(lambda: engine.status().mic_test is MicTestState.IDLE, timeout=60)
     time.sleep(0.3)
     streams = backend.streams_of("output", SPEAKERS)
     assert len(streams) == 1 and not streams[0].closed and engine.status().monitor
