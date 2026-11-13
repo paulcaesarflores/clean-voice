@@ -5,7 +5,9 @@ tests skip."""
 
 from __future__ import annotations
 
+import ctypes
 import dataclasses
+import statistics
 import sys
 import threading
 import time
@@ -75,31 +77,54 @@ def test_t23_its_chunk_round_trips_through_settings_json(plugin: vst.VstPlugin, 
     assert fine_tune.KINDS["vst_filter"].prop("chunk_data").widget == fine_tune.HIDDEN
 
 
-def test_t20_the_gil_is_released_while_the_plugin_runs(plugin: vst.VstPlugin) -> None:
-    eff = plugin._effect.contents
-    eff.set_parameter(plugin._effect, 1, 1.0)  # each call sleeps 10 ms in native code
+PLUGIN_SLEEP_S = 0.3
+
+
+def _longest_stall(plugin: vst.VstPlugin) -> float:
+    """The longest a UI-thread loop was held up, in seconds, while a worker made one plug-in call that sleeps
+    PLUGIN_SLEEP_S in native code. The loop can only run while the worker doesn't hold the GIL."""
     x = np.ones(480, np.float32)
     done = threading.Event()
-    calls = 20
 
     def worker() -> None:
-        for _ in range(calls):
-            plugin.process(x)
+        plugin.process(x)
         done.set()
 
-    # A UI-thread loop that notes how long it was held up: it can only run while the worker doesn't hold the GIL.
-    stalled, last = 0.0, time.perf_counter()
+    # The longest single gap, not a sum of small ones: a held GIL is one gap as long as the call, while a loaded
+    # machine's preemption (of this loop, or of the worker while it holds the GIL in Python) is a few time slices.
+    # The loop sleeps 1 ms a turn rather than spinning, so it is woken promptly instead of losing whole time slices.
+    longest, last = 0.0, time.perf_counter()
     thread = threading.Thread(target=worker)
     thread.start()
     while not done.is_set():
+        time.sleep(0.001)
         now = time.perf_counter()
-        if now - last > 0.002:
-            stalled += now - last
+        longest = max(longest, now - last)
         last = now
     thread.join()
-    # 200 ms asleep in the plug-in. Held through the call (measured with the same pointer called as a PYFUNCTYPE),
-    # the loop stalls for about all of it; released, it hardly stalls.
-    assert stalled < 0.1, stalled
+    return longest
+
+
+def test_t20_the_gil_is_released_while_the_plugin_runs(plugin: vst.VstPlugin) -> None:
+    plugin._effect.contents.set_parameter(plugin._effect, 1, PLUGIN_SLEEP_S * 100)  # sleeps value x 10 ms per call
+    released = plugin._process
+    # The control: the same function pointer called as a PYFUNCTYPE, which holds the GIL through the call. Measured in
+    # the same run, so a slow or loaded machine slows both alike.
+    address = ctypes.cast(released, ctypes.c_void_p).value
+    assert address is not None
+    held = ctypes.PYFUNCTYPE(None, vst.EffectPtr, vst.FloatPtrs, vst.FloatPtrs, ctypes.c_int32)(address)
+    runs: dict[str, list[float]] = {"released": [], "held": []}
+    try:
+        for _ in range(5):  # interleaved, so a burst of load hits both
+            for name, fn in (("released", released), ("held", held)):
+                plugin._process = fn
+                runs[name].append(_longest_stall(plugin))
+    finally:
+        plugin._process = released
+    median = {name: statistics.median(values) for name, values in runs.items()}
+    # Held, the loop's longest stall is the whole call; released, a few ms. The control proves the loop sees a held GIL.
+    assert median["held"] >= 0.9 * PLUGIN_SLEEP_S, runs
+    assert median["released"] < 0.5 * median["held"], runs
 
 
 def test_registry_unloads_the_real_binary(plugin: vst.VstPlugin) -> None:

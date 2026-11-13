@@ -123,10 +123,11 @@ def test_voice_survives_a_noisy_room(case: tuple[float, float | None, float, str
 # strength 70 is turned down >= 10 dB (hum) and >= 12 dB (fan), test_dsp NOISE_ALONE_MIN_DB (S2); (b) here, the whole
 # pauses of the 20 dB SNR mix at the defaults, pinned as a floor at what the chain reaches (J06 plan: "pinned at about
 # 19 dB as a floor"). It measures 18.61 dB (hum) and 17.34 dB (fan) with the OBS-style compressor (OBS audit I-2); the
-# floors sit 0.2 dB under, for other CPUs' float rounding: CI's Windows runner came 0.01-0.02 dB under this PC (run
-# 43368578097), and 0.2 dB is ten times that. They stay above strength 50's 17.92 / 16.75 dB, so a default that falls
-# back to weaker cleaning fails here (S2's floors would pass it). 30 dB is out of reach: the speech recording alone
-# leaves -61.8 dBFS in these pauses (its word tails and breaths).
+# floors sit 0.2 dB under, for other CPUs' float rounding: CI's Windows runner came up to 0.06 dB (hum) and 0.09 dB
+# (fan) under this PC (run 43368578097 printed 18.6 / 17.3 against those pins), which leaves it >= 0.15 dB above these
+# floors. They stay above strength 50's 17.92 / 16.75 dB, so a default that falls back to weaker cleaning fails here
+# (S2's floors would pass it). 30 dB is out of reach: the speech recording alone leaves -61.8 dBFS in these pauses (its
+# word tails and breaths).
 PAUSE_FLOOR_DB = {HUM: 18.4, FAN: 17.1}
 
 
