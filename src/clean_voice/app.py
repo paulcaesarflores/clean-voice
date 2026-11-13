@@ -144,7 +144,11 @@ METER_GAP = 16  # Steps 1 and 3: between a meter and its slider
 VALUE_W = 70  # the dB readouts of Mic level, Hear myself and Voice volume
 STYLE_W = 116  # the Voice style dropdown; the Denoise row keeps the same room, so both Strength sliders line up
 STEP_GAP = 14  # §7 says 18; 14 so all five steps fit (round 13)
-BODY_TOP, BODY_BOTTOM = 14, 12  # above Step 1, below Step 5
+# Above Step 1, and at least below Step 5. The steps end in a stretch, so the opening size shows the 12 px §7 gave this
+# margin when the text is offscreen's; the other 8 px are for real platforms' text, whose lines Windows and macOS draw
+# up to 1 px taller each (Barlow's fractional descent): 5 px in all at 100 % (CI run 43368578097).
+BODY_TOP, BODY_BOTTOM = 14, 4
+OUTPUT_H = 34  # Step 4's dropdown: fixed, as the theme dropdown is; Windows' style made it 38 px at 125 %
 SNAP_ROOM = 6  # a scrolled view starts this far above a step or row (round 16)
 HEADER_TOP, HEADER_BOTTOM = 12, 12  # §7 says 20 and 16; tightened with STEP_GAP
 ROW_GAP = 8  # §7 says 10; 8 so all five steps fit (round 13)
@@ -1434,6 +1438,7 @@ class MainWindow(QMainWindow):
         self.output_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.output_combo.setMinimumContentsLength(16)
         self.output_combo.setPlaceholderText("VB-CABLE (not installed)")
+        self.output_combo.setFixedHeight(OUTPUT_H)
         self.output_combo.opening.connect(self._picker_opening)
         self.output_combo.activated.connect(self._output_combo_chosen)
         step.body.addWidget(self.output_combo)

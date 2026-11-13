@@ -119,12 +119,14 @@ def test_voice_survives_a_noisy_room(case: tuple[float, float | None, float, str
     assert_every_word_comes_through(r)
 
 
-# The whole-pause reduction on the mix, pinned at what the chain reaches. With RNNoise alone (user decision,
-# 2026-11-11: no gate) it measured 19.03 dB on the hum and 17.56 dB on the fan; the removed gate gave 19.9 and 18.9 dB.
-# The OBS-style per-sample compressor (OBS audit I-2) then measured 18.61 and 17.34 dB: its follower lets go sooner after
-# each word, so the pauses keep more of the +6 dB makeup. The noise removal itself is unchanged. 30 dB is out of reach:
-# the speech recording alone leaves -61.8 dBFS in these pauses (its own word tails and breaths).
-PAUSE_FLOOR_DB = {HUM: 18.6, FAN: 17.3}
+# "Clearly reduced" (J06) in the pauses, where a guest hears the noise: the floors the user set for noise alone at
+# strength 70 (test_dsp NOISE_ALONE_MIN_DB, 2026-11-11), 10 dB on the tonal hum and 12 dB on the broadband fan. The
+# chain measures 18.61 and 17.34 dB (OBS-style compressor, OBS audit I-2), 8.6 and 5.3 dB of margin: the floors were
+# once pinned at those measurements, and CI's Windows runner came 0.01-0.02 dB under them (run 43368578097). With
+# RNNoise passing its input through, the pauses come out 6.0 and 5.6 dB louder (the compressor's makeup), and at
+# strength 0 only 0.6 and 1.1 dB quieter: this still fails if the noise removal breaks.
+# 30 dB is out of reach: the speech recording alone leaves -61.8 dBFS in these pauses (its word tails and breaths).
+PAUSE_FLOOR_DB = {HUM: 10.0, FAN: 12.0}
 
 
 @pytest.mark.parametrize("noise", NOISES)

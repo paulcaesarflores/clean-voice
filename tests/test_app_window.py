@@ -10,7 +10,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
-from clean_voice.app import MainWindow, main
+from clean_voice.app import MainWindow, audio_modules, main
 from clean_voice.engine import State, Status
 from clean_voice.preview import PreviewEngine
 
@@ -77,9 +77,8 @@ def test_the_windows_launch_check_covers_echo_removal() -> None:
     assert {"numpy", "scipy.signal", "samplerate", "sounddevice"} <= set(audio_modules("darwin"))
 
 
-@pytest.mark.parametrize(
-    "module", ["numpy", "scipy.signal", "samplerate", "sounddevice", "pywebrtc_audio", "pyaudiowpatch"]
-)
+# The libraries this platform's build holds and checks (the echo ones on Windows only; the test above pins both lists).
+@pytest.mark.parametrize("module", audio_modules())
 def test_quit_after_ms_fails_when_an_audio_library_is_missing(
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,

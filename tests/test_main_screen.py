@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QPointF, Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QFontMetrics
+from PySide6.QtGui import QDesktopServices, QFont, QFontDatabase, QFontMetrics
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLabel
 from pytestqt.qtbot import QtBot
@@ -353,9 +353,16 @@ def test_a_japanese_device_name_shows_verbatim(make) -> None:
     window.open_mic_menu()
     item = next(i for i in window.mic_menu.items if i.text() == JAPANESE)
     kana = [ch for ch in JAPANESE if ord(ch) > 0x3000]
+    japanese = [
+        family
+        for family in QFontDatabase.families(QFontDatabase.WritingSystem.Japanese)
+        if all(QFontMetrics(QFont(family)).inFontUcs4(ord(ch)) for ch in kana)
+    ]
+    if not japanese:  # no font here draws them, so neither can the app (CI's Windows runner, run 43368578097)
+        pytest.skip("no installed font has these kana")
     for font in (window.output_combo.font(), item.font(), window.input_button.font()):
         metrics = QFontMetrics(font)
-        assert all(metrics.inFontUcs4(ord(ch)) for ch in kana), font.families()
+        assert all(metrics.inFontUcs4(ord(ch)) for ch in kana), (font.families(), japanese)
 
 
 @pytest.mark.parametrize(("platform", "name"), [("win32", "CABLE Output"), ("darwin", "VB-Cable")])

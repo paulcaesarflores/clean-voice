@@ -297,8 +297,9 @@ def test_the_footer_fits_with_the_theme_choice(qtbot: QtBot, tmp_path: Path, sys
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows' own text at its display scales")
 @pytest.mark.parametrize("scale", ["1", "1.25", "1.5", "1.75", "2"])
-def test_the_footer_fits_on_windows_at_every_display_scale(scale: str) -> None:
-    """On the real Windows platform, where 125 % and 150 % text is wider and taller than offscreen's (r1 F1)."""
+def test_the_footer_and_the_steps_fit_on_windows_at_every_display_scale(scale: str) -> None:
+    """On the real Windows platform, where 125 % and 150 % text is wider and taller than offscreen's (r1 F1), and
+    every line of text up to 1 px taller even at 100 %: the footer fits and the five steps need no scrolling."""
     env = {**os.environ, "QT_QPA_PLATFORM": "windows", "QT_ENABLE_HIGHDPI_SCALING": "0", "QT_SCALE_FACTOR": scale}
     result = subprocess.run(
         [sys.executable, str(Path(footer_fit.__file__))],

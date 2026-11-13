@@ -4,6 +4,7 @@ The normal suite simulates minutes of audio; ``-m slow`` runs the full hour (WOR
 """
 
 import logging
+import sys
 from itertools import pairwise
 
 import numpy as np
@@ -33,6 +34,11 @@ from clean_voice.audio_path import (
 START_MS = TARGET_FILL_S * 1000  # the start cushion (60 ms)
 START_FRAMES = int(TARGET_FILL_S * SAMPLE_RATE)
 from clean_voice.dsp import Chain, PassThrough
+
+# Echo removal exists on Windows only in v1 (app.ECHO_MODULES; pyproject installs its AEC there only): "everything on"
+# is Hear myself and echo removal on Windows, Hear myself alone on macOS.
+ECHO = sys.platform == "win32"
+needs_echo = pytest.mark.skipif(not ECHO, reason="echo removal is Windows only in v1")
 
 
 def assert_clean_run(r: SimResult, max_fill_ms: float = 70.0) -> None:
@@ -161,26 +167,28 @@ def print_all(label: str, r: SimResult) -> None:
 def test_minutes_of_drift_with_everything_on() -> None:
     # D1: the full chain, echo removal on (loopback +50 ppm) and Hear myself on (monitor -150 ppm), mic +100 / cable
     # -100; the monitor and the reference carry tones, checked for continuity.
-    r = simulate(120.0, 100, -100, chain=Chain(), check_tone=False, monitor_ppm=-150, loopback_ppm=50)
+    loopback_ppm = 50 if ECHO else None
+    r = simulate(120.0, 100, -100, chain=Chain(), check_tone=False, monitor_ppm=-150, loopback_ppm=loopback_ppm)
     print_all("2 min everything on (full chain)", r)
     assert_clean_run(r)
-    assert_side_streams_clean(r, monitor=False)  # the monitor carries the chain's output, not a tone here
+    assert_side_streams_clean(r, monitor=False, echo=ECHO)  # the monitor carries the chain's output, not a tone here
     assert r.monitor_underruns == 0 and r.monitor_overflows == 0
-    p = simulate(120.0, 100, -100, monitor_ppm=-150, loopback_ppm=50)  # pass-through: the tone checks everywhere
+    p = simulate(120.0, 100, -100, monitor_ppm=-150, loopback_ppm=loopback_ppm)  # pass-through: the tone everywhere
     print_all("2 min everything on (pass-through)", p)
     assert_clean_run(p)
-    assert_side_streams_clean(p)
+    assert_side_streams_clean(p, echo=ECHO)
 
 
 def test_real_pattern_with_hear_myself_and_echo_on() -> None:
     # D1: the measured callback pattern for 5 min, the monitor and the loopback on shifted copies of it.
-    r = replay(load_pattern(), 300.0, monitor=True, echo=True)
+    r = replay(load_pattern(), 300.0, monitor=True, echo=ECHO)  # macOS: Hear myself only
     print_all("real pattern 300 s, monitor + echo", r)
     assert r.underruns == 0 and r.input_overflows == 0 and r.output_overflows == 0 and r.discontinuities == 0
-    assert_side_streams_clean(r)
+    assert_side_streams_clean(r, echo=ECHO)
 
 
 @pytest.mark.slow
+@needs_echo
 def test_one_hour_full_chain_echo_on() -> None:
     # D2
     r = simulate(3600.0, 100, -100, chain=Chain(), check_tone=False, loopback_ppm=50)
@@ -201,10 +209,10 @@ def test_one_hour_full_chain_hear_myself_on() -> None:
 @pytest.mark.slow
 def test_one_hour_real_pattern_everything_on() -> None:
     # D2
-    r = replay(load_pattern(), 3600.0, monitor=True, echo=True)
+    r = replay(load_pattern(), 3600.0, monitor=True, echo=ECHO)  # macOS: Hear myself only
     print_all("real pattern 1 h, monitor + echo", r)
     assert r.underruns == 0 and r.input_overflows == 0 and r.output_overflows == 0 and r.discontinuities == 0
-    assert_side_streams_clean(r)
+    assert_side_streams_clean(r, echo=ECHO)
 
 
 # ------------------------------------------------------------------ the output side on its own

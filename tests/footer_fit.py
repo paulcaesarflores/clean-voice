@@ -6,8 +6,9 @@ test_theme_choice.py checks this in its own (offscreen) process, and runs this f
 platform at several display scales: offscreen keeps 100 % text metrics at every ``QT_SCALE_FACTOR``, while Windows'
 own text at 125 % and 150 % is wider and taller, which once wrapped the note with "tray." alone.
 
-As a script: ``python tests/footer_fit.py`` with ``QT_QPA_PLATFORM`` and ``QT_SCALE_FACTOR`` set by the caller; prints
-each problem and exits 1 if there is any."""
+As a script: ``python tests/footer_fit.py`` with ``QT_QPA_PLATFORM`` and ``QT_SCALE_FACTOR`` set by the caller; checks
+the footer, and that the five steps fit the opening size in every state without a notice (test_one_window r13) with the
+platform's own text; prints each problem and exits 1 if there is any."""
 
 from __future__ import annotations
 
@@ -121,6 +122,7 @@ def main() -> int:
     app = QApplication([sys.argv[0]])
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from test_main_screen import DEVICES, MICS, OUTPUTS, FakeLoginItem
+    from test_one_window import NORMAL_STATES
 
     from clean_voice import prefs, theme
     from clean_voice.preview import PreviewEngine, sample_states
@@ -128,18 +130,38 @@ def main() -> int:
     theme.request_scheme = lambda mode: None  # never ask the platform for a scheme: this is a layout check
     tmp = Path(tempfile.mkdtemp(prefix="cv-footer-fit-"))
     found: list[str] = []
-    for platform, size in itertools.product(("win32", "darwin"), (WINDOW_SIZE, MIN_SIZE)):
-        sample = sample_states(DEVICES, platform)["running"]
+
+    def opened(platform: str, state: str, size: tuple[int, int]) -> MainWindow | None:
+        sample = sample_states(DEVICES, platform)[state]
         prefs.save(tmp / "s.json", sample.saved())
-        engine = PreviewEngine(sample.status, MICS, tmp, OUTPUTS)
+        engine = PreviewEngine(sample.status, MICS, tmp, OUTPUTS) if state == "running" else sample.engine(tmp)
         window = MainWindow(engine, tmp / "s.json", FakeLoginItem(), platform)
+        # Laid out and drawn with the platform's own fonts at its scale, but never handed to the window manager: the CI
+        # runner's 1024 x 768 screen is 682 px wide at 150 %, and Windows shrank a shown window to it, so the "opening
+        # size" check measured a 685 px window (CI run 43368578097). The size under test is the size checked.
+        window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
         window.resize(*size)
         window.show()
         window.tick()
         for _ in range(5):
             app.processEvents()
-        found += [f"{platform} {size}: {p}" for p in problems(window, size == WINDOW_SIZE)]
+        if (window.width(), window.height()) == size:
+            return window
+        found.append(f"{platform} {size}: the window is {window.width()} x {window.height()}, not the size checked")
         window.close()
+        return None
+
+    for platform, size in itertools.product(("win32", "darwin"), (WINDOW_SIZE, MIN_SIZE)):
+        if window := opened(platform, "running", size):
+            found += [f"{platform} {size}: {p}" for p in problems(window, size == WINDOW_SIZE)]
+            window.close()
+    # All five steps in view at the opening size (test_one_window r13) with this platform's own text metrics, which
+    # make Barlow's lines up to 1 px taller each than offscreen's (its descent is 2.39 px at 12 px, not 2).
+    for platform, state in itertools.product(("win32", "darwin"), NORMAL_STATES):
+        if window := opened(platform, state, WINDOW_SIZE):
+            if scroll := window.body.verticalScrollBar().maximum():
+                found.append(f"{platform} {state}: the five steps scroll {scroll} px at the opening size")
+            window.close()
     print(app.platformName(), "dpr", app.primaryScreen().devicePixelRatio(), "fits" if not found else "")
     print(*found, sep="\n")
     return 1 if found else 0

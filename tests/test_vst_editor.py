@@ -30,10 +30,15 @@ def test_t24_open_hands_the_plugin_a_native_parent_and_sizes_from_its_rect(qtbot
     assert window.windowFlags() & vst_editor.Qt.WindowType.MSWindowsFixedSizeDialogHint
     assert fake.editor_parent == int(window.view.winId())  # effEditOpen got our native view
     assert window.view.testAttribute(vst_editor.Qt.WidgetAttribute.WA_NativeWindow)
-    scale = window.devicePixelRatioF()
-    assert (window.width(), window.height()) == (int(400 / scale), int(300 / scale))
     opens = fake.opcodes.index(vst.EFF_EDIT_OPEN)
-    assert vst.EFF_EDIT_GET_RECT in fake.opcodes[opens:]  # Windows: open, then ask the rect (win :46-49)
+    if sys.platform == "darwin":
+        # mac/EditorWidget-osx.mm:37-49: the rect first, then open; the rect is in points, used as it is.
+        assert vst.EFF_EDIT_GET_RECT in fake.opcodes[:opens]
+        assert (window.width(), window.height()) == (400, 300)
+    else:
+        scale = window.devicePixelRatioF()  # win :51-58: the rect is in device pixels
+        assert (window.width(), window.height()) == (int(400 / scale), int(300 / scale))
+        assert vst.EFF_EDIT_GET_RECT in fake.opcodes[opens:]  # Windows: open, then ask the rect (win :46-49)
     assert vst_editor.open_editor(plugin, "Warm EQ") is window  # one editor at a time
     plugin.close()
 
