@@ -197,6 +197,27 @@ def test_microphone_permission(app: dict[str, Any]) -> None:
     assert app["permission"]["microphone"].strip()
 
 
+def test_mac_app_nap_is_disabled(app: dict[str, Any]) -> None:
+    # OBS sets LSAppNapIsDisabled (frontend/cmake/macos/Info.plist.in): App Nap would throttle the menu-bar app's
+    # timers during a call.
+    assert app["macOS"]["info"]["LSAppNapIsDisabled"] is True
+
+
+def test_briefcase_puts_app_nap_in_the_mac_info_plist() -> None:
+    # Briefcase's macOS create command resolves the `info` table into the Info.plist template context.
+    from briefcase.config import DraftAppConfig, FinalizedAppConfig, parse_config
+    from briefcase.console import Console
+    from briefcase.platforms.macOS.app import macOSAppCreateCommand
+
+    console = Console(input_enabled=False)
+    _, apps = parse_config(PYPROJECT, platform="macOS", output_format="app", console=console)
+    mac_app = FinalizedAppConfig(DraftAppConfig(**apps["clean-voice"]))
+    command = macOSAppCreateCommand(console=console)
+    info = command.permissions_context(mac_app, command._x_permissions(mac_app))["info"]
+    assert info["LSAppNapIsDisabled"] is True
+    assert info["NSMicrophoneUsageDescription"].strip()
+
+
 def test_audio_dependencies_pinned(pyproject: dict[str, Any]) -> None:
     deps = pyproject["project"]["dependencies"]
     reqs = [req.split(";")[0].strip() for req in deps]  # the environment marker, if any, is not part of the pin

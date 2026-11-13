@@ -67,6 +67,8 @@ universal_build = true
 min_os_version = "13.0"
 requires = ["std-nslog~=2.0.0"]
 cleanup_paths = ["**/clean_voice/native/rnnoise.dll"]
+# App Nap off, as OBS does (frontend/cmake/macos/Info.plist.in): it would throttle the menu-bar app during a call.
+info.LSAppNapIsDisabled = true
 
 [tool.briefcase.app.clean-voice.windows]
 requires = []

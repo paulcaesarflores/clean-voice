@@ -235,3 +235,15 @@ def test_macos_signs_and_strictly_verifies_the_rnnoise_dylib_before_briefcase(jo
     assert "src/clean_voice/native/librnnoise.dylib" in run
     assert "codesign --sign - --force" in run
     assert check < step_index(job, "-m briefcase create macOS")
+
+
+# App Nap stays off in the built app, as in OBS (frontend/cmake/macos/Info.plist.in): the generated Info.plist is
+# checked after the build, since only the macOS runner has Briefcase's template output.
+def test_macos_checks_app_nap_is_disabled_in_the_built_info_plist(jobs: dict[str, dict[str, Any]]) -> None:
+    job = jobs["package-macos"]
+    check = step_index(job, ':LSAppNapIsDisabled"')
+    run = steps(job)[check]["run"]
+    assert '/usr/libexec/PlistBuddy -c "Print :LSAppNapIsDisabled"' in run
+    assert '"build/clean-voice/macos/app/Clean Voice.app/Contents/Info.plist"' in run
+    assert '= "true"' in run
+    assert step_index(job, "-m briefcase build macOS") < check

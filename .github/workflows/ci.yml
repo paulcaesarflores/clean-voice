@@ -138,6 +138,12 @@ jobs:
         run: .venv/bin/python -m briefcase create macOS --no-input
       - name: Build (universal)
         run: .venv/bin/python -m briefcase build macOS --no-input
+      # App Nap stays off, as in OBS (frontend/cmake/macos/Info.plist.in).
+      - name: App Nap disabled in Info.plist
+        run: |
+          value=$(/usr/libexec/PlistBuddy -c "Print :LSAppNapIsDisabled" "build/clean-voice/macos/app/Clean Voice.app/Contents/Info.plist")
+          echo "LSAppNapIsDisabled: $value"
+          test "$value" = "true"
       - name: Package (ad-hoc-signed DMG)
         run: .venv/bin/python -m briefcase package macOS --adhoc-sign --no-input
       - name: Icon in the app (T38)
