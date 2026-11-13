@@ -1,6 +1,6 @@
 """Does the main window's footer fit (DESIGN "Theme choice", 2026-11-13; theme-choice r1 F1)? One row, nothing cut,
-the close note on one line at the opening size and never one word alone, and no taller than the switch row it always
-had.
+the close note on one line at the opening size and never one word alone at any width a guest drags it to, and no
+taller than the switch row it always had.
 
 test_theme_choice.py checks this in its own (offscreen) process, and runs this file as a script on the real Windows
 platform at several display scales: offscreen keeps 100 % text metrics at every ``QT_SCALE_FACTOR``, while Windows'
@@ -118,6 +118,26 @@ def problems(window: MainWindow, opening: bool) -> list[str]:
     return found
 
 
+SWEEP = range(MIN_SIZE[0], WINDOW_SIZE[0] + 41, 2)  # the minimum width to past the opening one, as a guest drags it
+
+
+def lone_words(window: MainWindow) -> list[str]:
+    """The widths in ``SWEEP`` at which the close note wraps with one word alone on its last line (ci-fixes r1: "bar."
+    at 714-747 px on the Mac's text, "tray." at 707-739 px on Windows'). Leaves the window at its width before."""
+    before = window.size()
+    found: list[str] = []
+    for width in SWEEP:
+        window.resize(width, before.height())
+        for _ in range(2):
+            QApplication.processEvents()
+        lines = note_lines(window.close_note)
+        if len(lines) > 1 and len(lines[-1].split()) <= 1:
+            found.append(f"{width} px: one word alone: {lines}")
+    window.resize(before)
+    QApplication.processEvents()
+    return found
+
+
 def main() -> int:
     app = QApplication([sys.argv[0]])
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -154,6 +174,8 @@ def main() -> int:
     for platform, size in itertools.product(("win32", "darwin"), (WINDOW_SIZE, MIN_SIZE)):
         if window := opened(platform, "running", size):
             found += [f"{platform} {size}: {p}" for p in problems(window, size == WINDOW_SIZE)]
+            if size == WINDOW_SIZE:
+                found += [f"{platform}: {p}" for p in lone_words(window)]
             window.close()
     # All five steps in view at the opening size (test_one_window r13) with this platform's own text metrics, which
     # make Barlow's lines up to 1 px taller each than offscreen's (its descent is 2.39 px at 12 px, not 2).

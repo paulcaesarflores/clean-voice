@@ -295,6 +295,14 @@ def test_the_footer_fits_with_the_theme_choice(qtbot: QtBot, tmp_path: Path, sys
     assert footer_fit.problems(window, opening=size == WINDOW_SIZE) == []
 
 
+@pytest.mark.parametrize("platform", ["win32", "darwin"])
+def test_the_close_note_never_leaves_one_word_alone(qtbot: QtBot, tmp_path: Path, system, platform: str) -> None:
+    """Dragged from the minimum width to past the opening one, the note never wraps with one word alone (ci-fixes r1:
+    "bar." and "tray." at some 30 px of widths in between)."""
+    window = _sample(qtbot, tmp_path, WINDOW_SIZE, platform)
+    assert footer_fit.lone_words(window) == []
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows' own text at its display scales")
 @pytest.mark.parametrize("scale", ["1", "1.25", "1.5", "1.75", "2"])
 def test_the_footer_and_the_steps_fit_on_windows_at_every_display_scale(scale: str) -> None:

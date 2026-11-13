@@ -198,13 +198,17 @@ def test_microphone_permission(app: dict[str, Any]) -> None:
 
 
 def test_mac_app_nap_is_disabled(app: dict[str, Any]) -> None:
-    # OBS sets LSAppNapIsDisabled (frontend/cmake/macos/Info.plist.in): App Nap would throttle the menu-bar app's
-    # timers during a call.
+    # The primary check. OBS sets LSAppNapIsDisabled (frontend/cmake/macos/Info.plist.in): App Nap would throttle the
+    # menu-bar app's timers during a call. CI's PlistBuddy step reads it back from the built app's Info.plist.
     assert app["macOS"]["info"]["LSAppNapIsDisabled"] is True
 
 
 def test_briefcase_puts_app_nap_in_the_mac_info_plist() -> None:
-    # Briefcase's macOS create command resolves the `info` table into the Info.plist template context.
+    # A secondary check, on Briefcase internals: its macOS create command resolves the `info` table into the Info.plist
+    # template context. Briefcase has no public way to get that context offline (`generate_app_template`, its only
+    # public caller, downloads and renders the template; `briefcase create macOS` runs on a Mac only), so this calls
+    # the private `_x_permissions` that `generate_app_template` calls. A Briefcase upgrade may break it with no app
+    # change: then update the call, and rely on the test above and CI's PlistBuddy step meanwhile.
     from briefcase.config import DraftAppConfig, FinalizedAppConfig, parse_config
     from briefcase.console import Console
     from briefcase.platforms.macOS.app import macOSAppCreateCommand

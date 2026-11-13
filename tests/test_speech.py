@@ -119,21 +119,22 @@ def test_voice_survives_a_noisy_room(case: tuple[float, float | None, float, str
     assert_every_word_comes_through(r)
 
 
-# "Clearly reduced" (J06) in the pauses, where a guest hears the noise: the floors the user set for noise alone at
-# strength 70 (test_dsp NOISE_ALONE_MIN_DB, 2026-11-11), 10 dB on the tonal hum and 12 dB on the broadband fan. The
-# chain measures 18.61 and 17.34 dB (OBS-style compressor, OBS audit I-2), 8.6 and 5.3 dB of margin: the floors were
-# once pinned at those measurements, and CI's Windows runner came 0.01-0.02 dB under them (run 43368578097). With
-# RNNoise passing its input through, the pauses come out 6.0 and 5.6 dB louder (the compressor's makeup), and at
-# strength 0 only 0.6 and 1.1 dB quieter: this still fails if the noise removal breaks.
-# 30 dB is out of reach: the speech recording alone leaves -61.8 dBFS in these pauses (its word tails and breaths).
-PAUSE_FLOOR_DB = {HUM: 10.0, FAN: 12.0}
+# "Clearly reduced" (J06) in the pauses, where a guest hears the noise. Two figures, kept apart: (a) noise alone at
+# strength 70 is turned down >= 10 dB (hum) and >= 12 dB (fan), test_dsp NOISE_ALONE_MIN_DB (S2); (b) here, the whole
+# pauses of the 20 dB SNR mix at the defaults, pinned as a floor at what the chain reaches (J06 plan: "pinned at about
+# 19 dB as a floor"). It measures 18.61 dB (hum) and 17.34 dB (fan) with the OBS-style compressor (OBS audit I-2); the
+# floors sit 0.2 dB under, for other CPUs' float rounding: CI's Windows runner came 0.01-0.02 dB under this PC (run
+# 43368578097), and 0.2 dB is ten times that. They stay above strength 50's 17.92 / 16.75 dB, so a default that falls
+# back to weaker cleaning fails here (S2's floors would pass it). 30 dB is out of reach: the speech recording alone
+# leaves -61.8 dBFS in these pauses (its word tails and breaths).
+PAUSE_FLOOR_DB = {HUM: 18.4, FAN: 17.1}
 
 
 @pytest.mark.parametrize("noise", NOISES)
 def test_background_noise_is_clearly_reduced_on_real_speech(noise: str) -> None:
     # N1 as restated by the orchestrator: (a) noise alone at strength 70 is turned down >= 10 dB (tonal hum) and >= 12 dB
     # (broadband fan) -- see test_dsp S2; (b) here: the pauses of the 20 dB SNR mix, defaults, pinned at the reachable
-    # floor, and audio_check finds 0 faults.
+    # floor (PAUSE_FLOOR_DB), and audio_check finds 0 faults.
     r = run_case(-26.0, 20.0, 70.0, noise)
     lat = Chain.LATENCY
     quiet = pauses(r.spans, len(r.x))

@@ -144,9 +144,10 @@ METER_GAP = 16  # Steps 1 and 3: between a meter and its slider
 VALUE_W = 70  # the dB readouts of Mic level, Hear myself and Voice volume
 STYLE_W = 116  # the Voice style dropdown; the Denoise row keeps the same room, so both Strength sliders line up
 STEP_GAP = 14  # §7 says 18; 14 so all five steps fit (round 13)
-# Above Step 1, and at least below Step 5. The steps end in a stretch, so the opening size shows the 12 px §7 gave this
-# margin when the text is offscreen's; the other 8 px are for real platforms' text, whose lines Windows and macOS draw
-# up to 1 px taller each (Barlow's fractional descent): 5 px in all at 100 % (CI run 43368578097).
+# Above Step 1, and at least below Step 5. The steps end in a stretch, so the opening size has room to spare under Step
+# 5: on real Windows text 12 px (§7's figure) at 100 % and 7 px at 125 % and above (ci-fixes r1, probe_layout_slack),
+# as Windows and macOS draw each line up to 1 px taller than offscreen does (Barlow's fractional descent; CI run
+# 43368578097). With a fixed 12 px here and OUTPUT_H unset, the steps scrolled 4 px at 100 % and 9 px at 125 %+.
 BODY_TOP, BODY_BOTTOM = 14, 4
 OUTPUT_H = 34  # Step 4's dropdown: fixed, as the theme dropdown is; Windows' style made it 38 px at 125 %
 SNAP_ROOM = 6  # a scrolled view starts this far above a step or row (round 16)
@@ -650,10 +651,11 @@ class CloseNote(QLabel):
     """The footer's close note, word-wrapped, its lines at most ``THEME_H / 2`` apart: two lines fill the switch row
     and no more, at every display scale. Windows' 12 px text has 15 px lines at 125 % and 150 % (14 at 100 %), and
     two of those made the footer 2 px taller at the minimum width (theme-choice r1 F1). The last line keeps its whole
-    height below its step, so its descenders are never cut (theme-choice r2 F2)."""
+    height below its step, so its descenders are never cut (theme-choice r2 F2). Its last two words are joined by a
+    no-break space, so a wrapped note never ends with one word alone ("bar." / "tray.", ci-fixes r1)."""
 
     def __init__(self, text: str) -> None:
-        super().__init__(text)
+        super().__init__("\N{NO-BREAK SPACE}".join(text.rsplit(" ", 1)))
         self.setWordWrap(True)
 
     def _line_box(self) -> float:
