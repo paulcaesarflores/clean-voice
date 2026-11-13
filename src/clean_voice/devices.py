@@ -236,7 +236,8 @@ class SoundDeviceBackend:
         if sys.platform != "win32":
             return
         try:
-            import pyaudiowpatch as pyaudio
+            # Windows only (pyproject marker): absent from macOS environments.
+            import pyaudiowpatch as pyaudio  # pyright: ignore[reportMissingImports]
 
             if self._pa is not None:
                 self._pa.terminate()

@@ -102,10 +102,11 @@ def merge_universal(slices: list[Path], output: Path) -> None:
     table = bytearray(struct.pack(">II", FAT_MAGIC, len(blobs)))
     body = bytearray()
     for (cputype, cpusubtype), blob in zip(headers, blobs, strict=True):
+        body += b"\0" * (offset - align - len(body))  # pad up to this slice's aligned offset, as lipo does
         table += struct.pack(">IIIII", cputype, cpusubtype, offset, len(blob), FAT_ALIGN)
-        padded = blob + b"\0" * (-len(blob) % align)
-        body += padded
-        offset += len(padded)
+        body += blob
+        offset += len(blob) + (-len(blob) % align)
+    # The file ends with the last slice: codesign's strict validation rejects any data after it.
     output.write_bytes(bytes(table) + b"\0" * (align - len(table)) + bytes(body))
 
 

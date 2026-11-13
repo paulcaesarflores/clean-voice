@@ -127,6 +127,13 @@ jobs:
           python -m venv .venv
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install -e . --group dev
+      # Briefcase's build ad-hoc signs every Mach-O and stops at the first one codesign refuses; signing a copy of the
+      # bundled RNNoise dylib here names that cause (the first CI run: data after its last slice).
+      - name: Sign and strictly verify the RNNoise dylib
+        run: |
+          cp src/clean_voice/native/librnnoise.dylib "$RUNNER_TEMP/librnnoise.dylib"
+          codesign --sign - --force "$RUNNER_TEMP/librnnoise.dylib"
+          codesign --verify --strict --verbose=2 "$RUNNER_TEMP/librnnoise.dylib"
       - name: Create
         run: .venv/bin/python -m briefcase create macOS --no-input
       - name: Build (universal)

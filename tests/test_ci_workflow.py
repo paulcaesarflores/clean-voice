@@ -224,3 +224,14 @@ def test_checks_build_the_vst_test_plugin_before_the_tests(jobs: dict[str, dict[
     assert editor > tests
     assert steps(checks)[editor]["if"] == "runner.os == 'Windows'"
     assert steps(checks)[editor]["env"] == {"QT_QPA_PLATFORM": "windows"}
+
+
+# The first CI run failed inside Briefcase's ad-hoc signing on librnnoise.dylib ("main executable failed strict
+# validation"); the dylib is signed and strictly verified on its own before Briefcase, so that cause is named.
+def test_macos_signs_and_strictly_verifies_the_rnnoise_dylib_before_briefcase(jobs: dict[str, dict[str, Any]]) -> None:
+    job = jobs["package-macos"]
+    check = step_index(job, "codesign --verify --strict")
+    run = steps(job)[check]["run"]
+    assert "src/clean_voice/native/librnnoise.dylib" in run
+    assert "codesign --sign - --force" in run
+    assert check < step_index(job, "-m briefcase create macOS")

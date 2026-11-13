@@ -19,7 +19,8 @@ from clean_voice.dsp import PassThrough
 from clean_voice.engine import ECHO_MAC, ECHO_NO_SPEAKERS, ECHO_PAUSED, EchoState, State
 
 try:
-    import pywebrtc_audio  # noqa: F401
+    # Windows only (pyproject marker): absent from macOS environments.
+    import pywebrtc_audio  # noqa: F401  # pyright: ignore[reportMissingImports]
 
     HAVE_AEC = True
 except ImportError:

@@ -1,5 +1,6 @@
 """Project metadata checks for the Briefcase project in ``pyproject.toml`` (J03, J04)."""
 
+import ast
 import os
 import re
 import sys
@@ -252,3 +253,35 @@ def test_the_app_uses_no_qml() -> None:
     # Why leaving the qml folder out is safe: Clean Voice is a Qt Widgets app.
     sources = (ROOT / "src" / "clean_voice").glob("*.py")
     assert not [p.name for p in sources if re.search(r"\bQt(Qml|Quick)", p.read_text(encoding="utf-8"))]
+
+
+def _not_installed_everywhere(pyproject: dict[str, Any]) -> set[str]:
+    """Import names of what CI's `pip install -e . --group dev` leaves out on some runner: platform-marked
+    dependencies and every other dependency group."""
+    reqs = [req for req in pyproject["project"]["dependencies"] if ";" in req]
+    reqs += [req for group, items in pyproject["dependency-groups"].items() if group != "dev" for req in items]
+    return {re.split(r"[\[=;<> ]", req, maxsplit=1)[0].lower().replace("-", "_") for req in reqs}
+
+
+def test_imports_of_packages_ci_does_not_install_skip_pyright(pyproject: dict[str, Any]) -> None:
+    # The first CI run's pyright failed on soundfile (tools group) on both OSes and on pywebrtc_audio (Windows only)
+    # on macOS: installed here, absent there. Each such import carries pyright's targeted ignore.
+    optional = _not_installed_everywhere(pyproject)
+    assert {"soundfile", "pywebrtc_audio", "pyaudiowpatch", "ziglang"} <= optional
+    files = [p for folder in ("src", "tests", "tools") for p in (ROOT / folder).rglob("*.py")]
+    files = [p for p in files if "sandbox" not in p.relative_to(ROOT).parts[:2]]
+    missing = []
+    for path in files:
+        source = path.read_text(encoding="utf-8")
+        lines = source.splitlines()
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names = [node.module]
+            else:
+                continue
+            ignored = "# pyright: ignore[reportMissingImports]" in lines[node.lineno - 1]
+            if any(name.split(".")[0] in optional for name in names) and not ignored:
+                missing.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    assert not missing, f"imports pyright cannot resolve on every CI runner, without the ignore: {missing}"

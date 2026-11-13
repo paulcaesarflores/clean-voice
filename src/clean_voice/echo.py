@@ -475,7 +475,8 @@ class EchoCanceller:
     one thread only: instances are not thread-safe."""
 
     def __init__(self, stream_delay_ms: int = round((MARGIN_S + AEC_FRAME_S) * 1000)) -> None:
-        from pywebrtc_audio import EchoCanceller as Aec3
+        # Windows only (pyproject marker): absent from macOS environments.
+        from pywebrtc_audio import EchoCanceller as Aec3  # pyright: ignore[reportMissingImports]
 
         # The delay hint: with the mic held back by the reference's age plus the margin and one frame, the echo
         # trails its reference by about that margin.

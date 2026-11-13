@@ -22,7 +22,8 @@ RATE = 48_000
 
 
 def convert(source: Path, dest: Path, start: float, seconds: float) -> None:
-    import soundfile as sf
+    # The optional `tools` group, which CI does not install.
+    import soundfile as sf  # pyright: ignore[reportMissingImports]
 
     info = sf.info(str(source))
     rate = int(info.samplerate)
