@@ -1,0 +1,113 @@
+[project]
+name = "clean-voice"
+version = "0.1.0"
+description = "Cleans a podcast guest's microphone and feeds the clean voice to VB-CABLE."
+requires-python = ">=3.12,<3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Paul Caesar Flores" }]
+dependencies = [
+    "PySide6-Essentials==6.11.3",
+    "numpy==2.5.4",
+    "scipy==1.18.1",
+    "samplerate==0.2.4",
+    "sounddevice==0.5.6",
+    # Check for updates verifies GitHub's certificate with this CA bundle: a Mac bundle's Python has none of its own.
+    "certifi==2026.10.23",
+    # Echo removal, Windows only (J06 Step 3): WebRTC AEC3 (Apache-2.0, WebRTC BSD-3 notice in its licence file) and
+    # PortAudio with WASAPI loopback (Apache-2.0; sounddevice's PortAudio has no loopback).
+    "pywebrtc-audio==0.2.0; sys_platform == 'win32'",
+    "PyAudioWPatch==0.2.12.9; sys_platform == 'win32'",
+]
+
+[project.urls]
+# The only URL source: Briefcase reads `url` from Homepage. Set the owner before publishing (CI fails until then).
+Homepage = "https://github.com/paulcaesarflores/clean-voice"
+
+[dependency-groups]
+dev = [
+    "briefcase==0.4.7",
+    "pytest==9.2.0",
+    "pytest-qt==4.5.0",
+    "ruff==0.17.4",
+    "pyright[nodejs]==1.1.414",
+    "pyyaml==6.0.3",
+    "actionlint-py==1.7.12.25",
+]
+# Only for rebuilding the bundled RNNoise libraries: tools/rnnoise/build_rnnoise.py.
+native = ["ziglang==0.17.1"]
+# Only for converting downloaded recordings into test fixtures: tools/convert_fixture.py (decodes MP3).
+tools = ["soundfile==0.14.0"]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.briefcase]
+project_name = "clean-voice"
+bundle = "io.github.paulcaesarflores.cleanvoice"
+# Keep equal to [project].version and clean_voice.__version__ (tests/test_project_config.py; the release checks the tag
+# against all three).
+version = "0.1.0"
+license = "MIT"
+# The installer's publisher (MSI Manufacturer, registry key, exe CompanyName, bundle METADATA), overriding
+# [project].authors for Briefcase only (DESIGN, Install folder). The copyright holder stays in LICENSE.
+author = "Clean Voice"
+
+[tool.briefcase.app.clean-voice]
+formal_name = "Clean Voice"
+description = "Cleans a podcast guest's microphone and feeds the clean voice to VB-CABLE."
+sources = ["src/clean_voice"]
+# The app icon: icons/clean-voice.ico and .icns, written from src/clean_voice/mark.py by tools/make_icons.py (J10).
+icon = "icons/clean-voice"
+permission.microphone = "Clean Voice cleans the sound of your microphone before it goes to your call app (Zoom, Meet, Discord or Teams)."
+
+[tool.briefcase.app.clean-voice.macOS]
+universal_build = true
+min_os_version = "13.0"
+requires = ["std-nslog~=2.0.0"]
+cleanup_paths = ["**/clean_voice/native/rnnoise.dll"]
+
+[tool.briefcase.app.clean-voice.windows]
+requires = []
+# PySide6's qml folder (Qt Quick modules and build output) is unused by this Qt Widgets app, and its 164-character
+# paths broke the MSI install under long user folders (J05). The install also leaves an empty scipy wheel file.
+cleanup_paths = ["**/clean_voice/native/librnnoise.dylib", "**/app_packages/PySide6/qml", "**/app_packages/*.whl"]
+# The MSI UpgradeCode, pinned to the value Briefcase derived from the first bundle id (io.github.cleanvoice), so
+# changing the bundle id cannot break Windows upgrades.
+guid = "77f9ae70-b7d9-5c5d-a2a8-380c042d321d"
+# Install to `<Program Files>\Clean Voice`, not under a folder named after the author (DESIGN, Install folder).
+use_full_install_path = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+cache-dir = ".cache/ruff"
+
+[tool.ruff.lint]
+extend-select = ["I", "UP", "B"]
+
+[tool.ruff.format]
+# The guard and the sandbox suite are not reflowed: a format-only diff of security code would hide real changes.
+exclude = [".claude/**", "tests/sandbox/**"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
+include = ["src", "tests", "tools"]
+# The tools import the shared speech helpers (tests/speech.py), and the tool tests import the tools.
+extraPaths = ["tests", "tools"]
+# pyright 1.1.414 always adds `**/.*` to these, so `.claude/hooks` is checked through tests/typecheck/hooks instead.
+# tools/sandbox is the gitignored staging copy of the hooks.
+exclude = ["**/__pycache__", "**/node_modules", "build", "dist", ".briefcase", ".cache", ".venv", "tools/sandbox"]
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests"]
+cache_dir = ".cache/pytest"
+# The 1-hour drift simulations are marked slow: run them with `-m slow`.
+addopts = ["-ra", "-m", "not slow"]
+markers = ["slow: long simulations (the 1-hour drift runs), skipped unless selected with -m slow"]
+qt_api = "pyside6"

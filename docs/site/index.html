@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Everything comes from this folder: no outside scripts, fonts, trackers or cookies. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+  <meta name="color-scheme" content="light dark">
+  <title>Clean Voice: a clean microphone for podcast guests</title>
+  <meta name="description" content="Free app for Windows and Mac that cleans your microphone so your podcast host hears you clearly.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='4.8' fill='%2315212B'/%3E%3Cg fill='%231E9A68'%3E%3Crect x='6' y='12' width='3' height='7'/%3E%3Crect x='11' y='7' width='3' height='12'/%3E%3Crect x='16' y='10' width='3' height='9'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script src="download.js" defer></script>
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <div class="brand">
+        <!-- Clean Voice's mark (app.py paint_logo): three lit LED bars on a dark square. -->
+        <svg class="mark" viewBox="0 0 24 24" width="56" height="56" aria-hidden="true">
+          <rect width="24" height="24" rx="4.8" fill="#15212B"/>
+          <g fill="#1E9A68">
+            <rect x="6" y="12" width="3" height="7"/>
+            <rect x="11" y="7" width="3" height="12"/>
+            <rect x="16" y="10" width="3" height="9"/>
+          </g>
+        </svg>
+        <h1>Clean Voice</h1>
+      </div>
+      <p class="tagline">Sound clear on your podcast. Clean Voice is a free app that cleans up your microphone, so the
+        host hears your voice, not your room.</p>
+
+      <div class="downloads">
+        <a class="download" data-os-target="windows" data-link="windows"
+           href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-Windows.msi">
+          <span class="label">Download for Windows</span>
+          <span class="sub">Windows 10 or 11</span>
+        </a>
+        <a class="download" data-os-target="mac" data-link="mac"
+           href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-macOS.dmg">
+          <span class="label">Download for Mac</span>
+          <span class="sub">macOS 13 or later, Apple Silicon and Intel</span>
+        </a>
+      </div>
+      <p class="other-os" data-for="windows">On a Mac? <a data-link="mac"
+        href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-macOS.dmg">Download for Mac</a></p>
+      <p class="other-os" data-for="mac">On Windows? <a data-link="windows"
+        href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-Windows.msi">Download for Windows</a></p>
+      <p class="any-os">Clean Voice runs on Windows and Mac computers.</p>
+    </header>
+
+    <section class="setup" aria-labelledby="setup-title">
+      <h2 id="setup-title">Set up in three steps</h2>
+      <ol class="steps">
+        <li>
+          <h3>Install VB-CABLE</h3>
+          <p>It's free. It gives Clean Voice a virtual microphone to send your clean voice through.
+            <a href="https://vb-audio.com/Cable/">Get VB-CABLE from vb-audio.com</a></p>
+        </li>
+        <li>
+          <h3>Install and open Clean Voice</h3>
+          <p>Open the file you downloaded and follow the installer. Then open Clean Voice and pick your microphone.</p>
+        </li>
+        <li id="step-cable">
+          <!-- download.js names the one for the visitor's computer (data-cable). -->
+          <h3>Choose <span data-cable>“CABLE Output” on Windows, “VB-Cable” on Mac,</span> in your call app</h3>
+          <p>In Google Meet, Zoom, Discord or Teams, open the audio settings and pick
+            <strong data-cable>“CABLE Output” on Windows, “VB-Cable” on Mac,</strong> as your microphone and turn off
+            its own noise cancellation. That's your clean voice.</p>
+        </li>
+      </ol>
+    </section>
+
+    <figure class="shot">
+      <!-- download.js swaps in the Mac screenshots (running-mac*.png, which say VB-Cable) for Mac visitors. -->
+      <picture>
+        <source data-shot="dark" srcset="running-dark.png" media="(prefers-color-scheme: dark)">
+        <img data-shot="light" src="running.png" width="760" height="684"
+             alt="The Clean Voice window, switched on. The headline says: Your call hears your clean voice. Below it, five numbered steps: choose your microphone, clean your voice, adjust volume, send clean voice to your call, and record a backup.">
+      </picture>
+      <figcaption>The Clean Voice window while it cleans your voice: five steps, top to bottom.</figcaption>
+    </figure>
+
+    <section class="warnings" aria-labelledby="warn-title">
+      <h2 id="warn-title">Windows or Mac warns you?</h2>
+      <p>Clean Voice is free and not signed with a paid certificate, so your computer doesn't know it yet.</p>
+      <ul>
+        <li><strong>Windows:</strong> on the blue SmartScreen box, click <em>More info</em>, then <em>Run anyway</em>.</li>
+        <li><strong>Mac:</strong> open System Settings → Privacy &amp; Security, scroll down and click <em>Open Anyway</em>.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>Made for podcast guests. Free and open source under the
+      <a data-link="licence" href="https://github.com/paulcaesarflores/clean-voice/blob/main/LICENSE">MIT licence</a> ·
+      <a data-link="source" href="https://github.com/paulcaesarflores/clean-voice">Source code</a></p>
+  </footer>
+</body>
+</html>

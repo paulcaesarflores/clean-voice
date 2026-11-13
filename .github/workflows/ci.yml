@@ -1,0 +1,163 @@
+# Clean Voice CI (J04): the local gate on Windows and macOS, then the MSI and the universal DMG, each installed or
+# mounted and launch-checked; an Intel Mac launches the same DMG. The same checks a developer runs locally.
+# release.yml calls this whole workflow on a version tag and publishes its two installer artifacts.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  checks:
+    name: Checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Job-level env cannot read the runner context, so the per-OS values live here.
+        include:
+          - {os: windows-latest, bin: .venv/Scripts}
+          - {os: macos-latest, bin: .venv/bin}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Create .venv and install
+        run: |
+          python -m venv .venv
+          ${{ matrix.bin }}/python -m pip install --upgrade pip
+          ${{ matrix.bin }}/python -m pip install -e . --group dev
+      - name: Lint
+        run: ${{ matrix.bin }}/python -m ruff check .
+      - name: Format
+        run: ${{ matrix.bin }}/python -m ruff format --check .
+      - name: Types
+        run: ${{ matrix.bin }}/python -m pyright
+      - name: Workflow lint
+        run: ${{ matrix.bin }}/actionlint -shellcheck= -pyflakes=
+      # The VST host's tests load a real plug-in (J10 T23, T24): our own test plug-in, built with Zig as RNNoise is.
+      - name: Build the VST test plug-in
+        run: |
+          ${{ matrix.bin }}/python -m pip install --group native
+          ${{ matrix.bin }}/python tools/vst_test_plugin/build.py
+      - name: Tests
+        run: ${{ matrix.bin }}/python -m pytest
+      # The plug-in editor needs a real window system; the Tests step runs Qt offscreen, where these skip.
+      - name: VST editor (Windows desktop)
+        if: runner.os == 'Windows'
+        env:
+          QT_QPA_PLATFORM: windows
+        run: ${{ matrix.bin }}/python -m pytest tests/test_vst_editor.py
+
+  package-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Create .venv and install
+        run: |
+          python -m venv .venv
+          .venv/Scripts/python -m pip install --upgrade pip
+          .venv/Scripts/python -m pip install -e . --group dev
+      - name: Create
+        run: .venv/Scripts/python -m briefcase create windows --no-input
+      - name: Build
+        run: .venv/Scripts/python -m briefcase build windows --no-input
+      # Briefcase's build leaves the stub's "Copyright (C) 2022": LICENSE's line goes in before the MSI takes the exe.
+      - name: Copyright in the exe
+        run: .venv/Scripts/python tools/ci/set_copyright.py "build/clean-voice/windows/app/src/Clean Voice.exe"
+      - name: Package (unsigned MSI)
+        run: .venv/Scripts/python -m briefcase package windows --adhoc-sign --no-input
+      # T38: the fresh create above takes pyproject's icon, so the exe and the MSI must carry ours, not Briefcase's.
+      - name: Icon in the exe
+        run: .venv/Scripts/python tools/ci/check_icons.py exe "build/clean-voice/windows/app/src/Clean Voice.exe"
+      - name: Icon in the MSI
+        shell: bash
+        run: .venv/Scripts/python tools/ci/check_icons.py msi dist/*.msi
+      # Uploaded before the launch check, so a failed launch still leaves the installer to inspect.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: clean-voice-windows-msi
+          path: dist/*.msi
+          if-no-files-found: error
+      - name: Install, launch and uninstall the MSI
+        run: .venv/Scripts/python tools/ci/smoke_app.py msi dist
+
+  package-macos:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Create .venv and install
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e . --group dev
+      - name: Create
+        run: .venv/bin/python -m briefcase create macOS --no-input
+      - name: Build (universal)
+        run: .venv/bin/python -m briefcase build macOS --no-input
+      - name: Package (ad-hoc-signed DMG)
+        run: .venv/bin/python -m briefcase package macOS --adhoc-sign --no-input
+      - name: Icon in the app (T38)
+        run: .venv/bin/python tools/ci/check_icons.py app "build/clean-voice/macos/app/Clean Voice.app"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: clean-voice-macos-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+      - name: Mount, universal check and launch (Apple Silicon)
+        run: .venv/bin/python tools/ci/smoke_app.py dmg dist --arch arm64
+
+  smoke-macos-intel:
+    needs: package-macos
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The launch-check script is standard library only: no install.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: clean-voice-macos-dmg
+          path: dist
+      - name: Mount, universal check and launch (Intel)
+        run: python tools/ci/smoke_app.py dmg dist --arch x86_64

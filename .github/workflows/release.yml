@@ -1,0 +1,70 @@
+# Clean Voice release: on a pushed tag vX.Y.Z, the tag is checked against the app version, then the whole CI workflow
+# runs (checks, the MSI, the universal DMG and every launch check, Intel included), then a GitHub Release is made with
+# the installers under stable names, so releases/latest/download/Clean-Voice-Windows.msi (and -macOS.dmg) are
+# permanent links. The checksum files are the ones the in-app updater verifies (src/clean_voice/updates.py).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # A tag that is not the app version fails here in seconds, before the long CI run.
+  tag:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Tag is the app version
+        run: python tools/ci/release_assets.py --check-only --tag "$GITHUB_REF_NAME"
+
+  ci:
+    needs: tag
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The release script is standard library only: no install.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: clean-voice-windows-msi
+          path: artifacts/msi
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: clean-voice-macos-dmg
+          path: artifacts/dmg
+      - name: Stable names and checksums
+        run: python tools/ci/release_assets.py release --msi artifacts/msi --dmg artifacts/dmg --tag "$GITHUB_REF_NAME"
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" release/*
+          --repo "$GITHUB_REPOSITORY" --title "Clean Voice $GITHUB_REF_NAME" --generate-notes --verify-tag

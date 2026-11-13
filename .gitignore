@@ -1,0 +1,49 @@
+# Reference material: the original app and the OBS Studio source. Not ours to publish.
+reference/
+
+# Reviewer probes and other throwaway work
+scratch/
+
+# Rendered previews of the download page: never committed or published
+docs/site/_preview/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+
+# Tool caches redirected into the project by the sandbox (pip, pyright, npm, Briefcase)
+.cache/
+
+# Staged copies of the sandbox hooks while a hook change is in progress (J02)
+tools/sandbox/
+
+# Briefcase output
+build/
+dist/
+logs/
+.briefcase/
+
+# Install metadata (editable install, briefcase dev)
+*.dist-info/
+*.egg-info/
+
+# Kept local, never published (user decision, release r1): the Claude Code agent setup and its sandbox (the guard's
+# tests and the hooks' type-check), the project's working docs (all of docs/ except the download page) and the
+# local launcher. .claude/ also holds the machine-specific settings.local.json and launch.json.
+/CLAUDE.md
+/.claude/
+/tests/sandbox/
+/tests/typecheck/
+/tests/test_hook_types.py
+/docs/*
+!/docs/site/
+/Run Clean Voice.bat
+
+# OS clutter
+.DS_Store
+Thumbs.db
