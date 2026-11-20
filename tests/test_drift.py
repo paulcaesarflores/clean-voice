@@ -260,8 +260,9 @@ def test_underrun_on_a_block_boundary_still_fades() -> None:
 
 def test_underrun_fades_out_counts_and_never_skips() -> None:
     path = make_path()
-    feed(path, TARGET_FILL_S + 0.01)
     out = np.zeros((480, 2), np.float32)
+    path.output_callback(out, 480, None, None)  # the device has started: only then does the cable queue (B001)
+    feed(path, TARGET_FILL_S + 0.01)
     played = []
     for _ in range(int(TARGET_FILL_S * 100) + 3):  # drain past the end of the audio
         path.output_callback(out, 480, None, None)
@@ -626,3 +627,42 @@ def test_callbacks_only_copy_and_timestamp(monkeypatch: pytest.MonkeyPatch) -> N
     assert path.cable.stamps.count == 100
     assert path.mic_stamps.time[99] == pytest.approx(1.0)
     assert path.cable.stamps.frames[99] == 99 * 441  # frames read before that callback
+
+
+def test_the_cable_queues_nothing_before_its_first_callback() -> None:
+    # B001 item 6 (E-1): the cable's device has not called back yet (a Bluetooth headset takes up to half a second), so
+    # nothing may queue ahead of it, as with Hear myself (libobs/audio-monitoring/win32/wasapi-output.c: the render
+    # client starts first, audio is written only after). Once it calls, the ring holds about the target, not 0.5 s.
+    path = make_path()
+    block = np.full((480, 1), 0.5, np.float32)
+    for _ in range(50):  # 0.5 s of mic, no cable callback yet
+        path.input_callback(block, 480, None, None)
+        path.process()
+    assert path.cable.callbacks == 0 and path.blocks_processed == 50
+    out = np.zeros((480, 2), np.float32)
+    path.output_callback(out, 480, None, None)
+    assert path.cable.ring.available() <= START_FRAMES + 480, path.cable.ring.available()
+
+
+def test_a_new_sink_does_not_add_buffering_for_old_underruns() -> None:
+    # B001 item 21 (E-6): the counters are shared and already hold old underruns; a new sink must start from them
+    # (obs-audio.c:361-390, add_audio_buffering: buffering grows only when a source is late now).
+    from clean_voice.audio_path import Counters
+
+    block = np.full(480, 0.5, np.float32)
+    counters = Counters()
+    counters.underruns = 3
+    sink = Sink(SAMPLE_RATE, 2, counters)
+    sink.push(block)
+    assert sink.target_ms == pytest.approx(START_MS)
+
+    path = make_path()
+    path.counters.underruns = 3
+    cable = path.attach_cable(SAMPLE_RATE, 2)  # a reattached cable
+    cable.push(block)
+    assert cable.target_ms == pytest.approx(START_MS)
+
+    path.monitor_counters.underruns = 3
+    monitor = path.add_monitor(SAMPLE_RATE, 2)  # Hear myself switched on
+    monitor.push(block)
+    assert monitor.target_ms == pytest.approx(START_MS)

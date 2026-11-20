@@ -196,6 +196,7 @@ def drive(path: AudioPath, blocks: int, value_of=lambda k: 0.1) -> tuple[list[np
     """Run the path block by block; return what went to the cable sink and to the speaker sink (48 kHz blocks)."""
     to_cable: list[np.ndarray] = []
     to_monitor: list[np.ndarray] = []
+    path.cable.callbacks = max(path.cable.callbacks, 1)  # the cable's device is running (B001: no push before)
     real_cable = path.cable.push
 
     def cable_push(clean):

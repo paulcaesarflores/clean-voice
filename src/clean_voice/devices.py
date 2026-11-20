@@ -69,8 +69,14 @@ class Streams(Protocol):
 class MainStreams(Streams, Protocol):
     """The mic and cable streams opened together by ``Backend.open``."""
 
+    @property
+    def input_active(self) -> bool: ...
+
+    @property
+    def output_active(self) -> bool: ...
+
     def close_output(self) -> None:
-        """Close only the cable's stream (it stalled); the mic keeps running, and ``active`` then means the mic."""
+        """Close only the cable's stream (it stalled); the mic keeps running; ``output_active`` is then False."""
         ...
 
 
@@ -143,8 +149,16 @@ class _SoundDeviceStreams:
         self._output = output  # the cable's stream, which can be closed on its own
 
     @property
+    def input_active(self) -> bool:
+        return all(s.active for s in self._streams if s is not self._output)
+
+    @property
+    def output_active(self) -> bool:
+        return self._output is not None and bool(self._output.active)
+
+    @property
     def active(self) -> bool:
-        return all(s.active for s in self._streams)
+        return self.input_active and self.output_active
 
     @staticmethod
     def _close_one(s: Any) -> None:

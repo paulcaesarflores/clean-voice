@@ -816,10 +816,15 @@ class Engine:
         self._pump_monitor(path, now)
         self._pump_echo(path, now)
         mic_stalled = now - self._last_in[1] > self._allowed(self._last_in[0])
-        cable_stalled = not self._cable_down and now - self._last_out[1] > self._allowed(self._last_out[0])
-        if mic_stalled or not streams.active:
-            self._lost(mic_stalled, cable_stalled)
-        elif cable_stalled or (self._cable_stream is not None and not self._cable_stream.active):
+        # Each stream's own state decides (OBS win-wasapi.cpp:959-993, :1089-1224): a dead cable closes only the cable.
+        cable_stream = self._cable_stream
+        cable_active = cable_stream.active if cable_stream is not None else streams.output_active
+        cable_dead = not self._cable_down and (
+            now - self._last_out[1] > self._allowed(self._last_out[0]) or not cable_active
+        )
+        if mic_stalled or not streams.input_active:
+            self._lost()
+        elif cable_dead:
             self._cable_lost(now)
         elif self._cable_down and now >= self._cable_retry_at:
             self._reopen_cable(path, now)
@@ -872,18 +877,13 @@ class Engine:
         log.info("the cable is back: %s", cable.name)
         self._update(state=State.ON, output=cable.name)
 
-    def _lost(self, mic_stalled: bool, cable_stalled: bool) -> None:
+    def _lost(self) -> None:
         """A device stopped: close cleanly, find out which, and retry every few seconds."""
         self._close_streams()
         self._scan()
         backend = self._backend
         assert backend is not None
-        if self._find_output() is None:
-            state = State.CABLE_LOST
-        elif self._find_mic() is None:
-            state = State.MIC_LOST
-        else:
-            state = State.CABLE_LOST if cable_stalled and not mic_stalled else State.MIC_LOST
+        state = State.CABLE_LOST if self._find_output() is None else State.MIC_LOST
         log.warning("audio device lost (%s); retrying every %.0f s", state.value, self._retry_s)
         self._retry_at = time.monotonic() + self._retry_s
         self._update(state=state)

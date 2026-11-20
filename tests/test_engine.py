@@ -73,6 +73,7 @@ class FakeStreams:
         self.path = path
         self.closed = False
         self.output_closed = False  # only the cable's stream was closed (close_output)
+        self._t0 = time.monotonic()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -82,7 +83,8 @@ class FakeStreams:
         while not self.closed:
             if self.mic in self.backend.present:
                 self.path.input_callback(block, 480, None, None)
-            if self.output in self.backend.present and not self.output_closed:
+            started = time.monotonic() - self._t0 >= self.backend.cable_start_delay_s  # a slow device start
+            if self.output in self.backend.present and not self.output_closed and started:
                 self.path.output_callback(out, 480, None, self.backend.output_status)
             time.sleep(0.01)
 
@@ -90,8 +92,16 @@ class FakeStreams:
         self.output_closed = True
 
     @property
-    def active(self) -> bool:
+    def input_active(self) -> bool:
         return not self.closed
+
+    @property
+    def output_active(self) -> bool:
+        return not self.closed and not self.backend.output_inactive
+
+    @property
+    def active(self) -> bool:
+        return self.input_active and self.output_active
 
     def close(self) -> None:
         self.closed = True
@@ -108,6 +118,8 @@ class FakeBackend:
         self.rescans_while_open = 0
         self.mic_value = 0.1
         self.fail_open: str | None = None
+        self.cable_start_delay_s = 0.0  # the cable's device calls back only this long after its stream opened
+        self.output_inactive = False  # the main cable stream reports itself inactive
         self.output_status = False  # what the fake cable reports to each callback (True: a device error)
         self.default_out: Device | None = SPEAKERS
         self.extra_streams: list[FakeOutput] = []  # monitor, silent render and loopback streams
@@ -710,6 +722,66 @@ def test_a_cable_stall_keeps_the_mic_and_the_backup(make_engine) -> None:
     played = engine.status().counters.underruns
     wait_for(lambda: backend.streams_of("output", CABLE) and backend.streams_of("output", CABLE)[-1].calls > 20)
     assert engine.status().counters.underruns <= played + 1  # the reopened cable plays the voice again
+
+
+def test_a_cable_that_goes_inactive_keeps_the_mic_and_the_backup(make_engine, caplog) -> None:
+    # B001 item 8 (E-3): an inactive cable stream used to close everything (MIC_LOST). Each stream's own state decides,
+    # as each OBS source has its own reconnect (win-wasapi.cpp:959-993, :1089-1224): only the cable closes and returns.
+    caplog.set_level("WARNING", logger="clean_voice")
+    engine, backend = make_engine([MIC, CABLE])
+    engine.start(MIC.name)
+    wait_for(lambda: engine.status().state is State.ON)
+    first = backend.opened[0]
+    path = engine._path
+    assert path is not None
+    wait_for(lambda: engine.status().recording_seconds > 0.5)
+    mic0, rec0 = path.in_ring.total_written, engine.status().recording_seconds
+    backend.output_inactive = True  # stays set: a reopened cable is judged by its own new stream
+    seen: list[State] = []
+    deadline = time.monotonic() + 1.5
+    while time.monotonic() < deadline:
+        seen.append(engine.status().state)
+        time.sleep(0.01)
+    assert State.MIC_LOST not in seen, set(seen)
+    assert not first.closed, "the mic stream was stopped by a cable that went inactive"
+    assert State.CABLE_LOST in seen and engine.status().state is State.ON, set(seen)
+    assert len(backend.opened) == 1 and len(backend.streams_of("output", CABLE)) == 1  # reopened exactly once
+    assert sum("the cable stopped" in r.getMessage() for r in caplog.records) == 1  # no repeated _cable_lost
+    delivered = (path.in_ring.total_written - mic0) / 48_000
+    assert engine.status().recording_seconds - rec0 >= delivered - 0.15
+
+
+def test_stop_while_the_cable_is_down_closes_cleanly(tmp_path) -> None:
+    backend = BusyCableBackend([MIC, CABLE])
+    engine = engine_module.Engine(tmp_path / "Recordings", backend, retry_s=0.2, watchdog_s=0.3)
+    try:
+        engine.start(MIC.name)
+        wait_for(lambda: engine.status().state is State.ON)
+        first = backend.opened[0]
+        backend.cable_busy = True
+        backend.output_inactive = True
+        wait_for(lambda: engine.status().state in (State.CABLE_LOST, State.MIC_LOST))
+        time.sleep(0.5)
+        assert engine.status().state is State.CABLE_LOST and not first.closed  # the mic runs on
+        engine.stop()
+        wait_for(lambda: engine.status().state is State.OFF)
+        assert first.closed
+    finally:
+        engine.close()
+
+
+def test_a_slow_starting_cable_does_not_pile_up_voice(make_engine) -> None:
+    # B001 item 6 (E-1): the cable calls back only after 0.5 s; nothing may queue before it (wasapi-output.c).
+    engine, backend = make_engine([MIC, CABLE])
+    backend.cable_start_delay_s = 0.5
+    engine.start(MIC.name)
+    wait_for(lambda: engine.status().state is State.ON)
+    path = engine._path
+    assert path is not None
+    wait_for(lambda: path.cable.callbacks > 20)
+    assert path.cable.ring.available() <= int(0.060 * 48_000) + 480, path.cable.ring.available()
+    delivered = path.in_ring.total_written / 48_000
+    assert delivered >= 0.5 and engine.status().recording_seconds >= delivered - 0.15
 
 
 class BusyCableBackend(FakeBackend):

@@ -350,7 +350,7 @@ class Sink:
         self._step = BUFFERING_STEP_S * out_rate
         self._max_target = MAX_TARGET_S * out_rate
         self._max_warned = False
-        self._underruns_seen = 0
+        self._underruns_seen = self.counters.underruns  # obs-audio.c:361-390: only lateness now adds buffering
         self._fill_sum = 0.0
         self._fill_n = 0
         self._fill_t0: float | None = None
@@ -751,7 +751,9 @@ class AudioPath:
         self.output_peak = max(self.output_peak, float(np.max(np.abs(clean))))
         if self.recorder is not None:
             self.recorder.write(clean, raw)  # the raw backup is the mic itself, never delayed or cancelled
-        if self.cable_live:
+        if (
+            self.cable_live and self.cable.callbacks > 0
+        ):  # wasapi-output.c:279-345: nothing queues before the device runs
             self.cable.push(clean)
         self._feed_monitor(clean)
         self.blocks_processed += 1
