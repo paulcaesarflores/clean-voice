@@ -95,7 +95,7 @@ OWN_KINDS: tuple[str, ...] = (DENOISE_KIND, STYLE_KIND, EQ_KIND)  # Clean Voice'
 
 
 def _eq_props() -> tuple[Prop, ...]:
-    """The 10-band EQ's properties: each band's on, type, freq, gain and Q, then the output trim (parametric_eq)."""
+    """The 10-band EQ's properties: each band's on, type, freq, gain, Q and slope, then the output trim (parametric_eq)."""
     out: list[Prop] = []
     for i in range(1, pe.BANDS + 1):
         out += [
@@ -104,6 +104,17 @@ def _eq_props() -> tuple[Prop, ...]:
             Prop(pe.key(i, "freq"), f"Band {i} frequency", SLIDER, pe.FREQS[i - 1], *pe.FREQ_RANGE, 1.0, " Hz"),
             Prop(pe.key(i, "gain"), f"Band {i} gain", SLIDER, 0.0, *pe.GAIN_RANGE, 0.1, " dB"),
             Prop(pe.key(i, "q"), f"Band {i} Q", SLIDER, pe.DEFAULT_Q, *pe.Q_RANGE, 0.1),
+            Prop(  # a low or high cut's dB per octave (B014): 6, 12, 18 or 24
+                pe.key(i, "slope"),
+                f"Band {i} slope",
+                SLIDER,
+                pe.DEFAULT_SLOPE,
+                pe.SLOPES[0],
+                pe.SLOPES[-1],
+                6,
+                " dB",
+                is_int=True,
+            ),
         ]
     out.append(Prop("trim", "Output", SLIDER, 0.0, *pe.TRIM_RANGE, 0.1, " dB"))
     return tuple(out)

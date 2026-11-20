@@ -16,6 +16,7 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QComboBox,
     QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
@@ -116,6 +117,7 @@ class EqGraph(QWidget):
             float(v[pe.key(i, "freq")]),  # type: ignore[arg-type]
             float(v[pe.key(i, "gain")]),  # type: ignore[arg-type]
             float(v[pe.key(i, "q")]),  # type: ignore[arg-type]
+            pe.snap_slope(v.get(pe.key(i, "slope"))),
         )
 
     def dot_pos(self, i: int) -> QPointF:
@@ -364,8 +366,26 @@ class _TypeButton(QAbstractButton):
             p.drawRoundedRect(box, 4, 4)
 
 
+class _SlopeBox(QComboBox):
+    """A cut's slope list ("6 dB" .. "24 dB"); like the number boxes it leaves the wheel to the pane unless focused."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        for slope in pe.SLOPES:
+            self.addItem(f"{slope} dB", slope)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName(name)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if not self.hasFocus():
+            event.ignore()
+            return
+        super().wheelEvent(event)
+
+
 class BandRow:
-    """One band's controls; ``on``, ``gain``, ``freq``, ``q`` and ``types`` (kind -> button) are for the tests."""
+    """One band's controls; ``on``, ``gain``, ``slope``, ``freq``, ``q`` and ``types`` (kind -> button) are for the
+    tests. A low or high cut shows the slope list where the (unused) gain box would be."""
 
     def __init__(self, number: int) -> None:
         color = BAND_COLORS[number - 1]
@@ -378,14 +398,26 @@ class BandRow:
         self.gain = _Spin(*pe.GAIN_RANGE, 1, 0.5, " dB", f"Band {number} gain")
         self.freq = _Spin(*pe.FREQ_RANGE, 0, 1.0, " Hz", f"Band {number} frequency")
         self.q = _Spin(*pe.Q_RANGE, 2, 0.1, "", f"Band {number} Q")
+        self.slope = _SlopeBox(f"Band {number} slope")
         self.types = {kind: _TypeButton(kind, label) for kind, label in pe.TYPES}
         for w in (self.gain, self.freq, self.q):
             w.setFixedWidth(86 if w is self.freq else 78)
+        self.slope.setFixedSize(78, 27)  # as tall as the number boxes
+        self.kind = ""
 
     def show_type(self, kind: str) -> None:
+        self.kind = kind
         for k, button in self.types.items():
             button.setChecked(k == kind)
-        self.gain.setEnabled(kind in pe.GAINED)  # a cut or notch has no gain
+        cut = kind in ("low_cut", "high_cut")
+        self.slope.setVisible(cut)
+        self.gain.setVisible(not cut)
+        self.gain.setEnabled(kind in pe.GAINED)  # a notch has no gain
+        self.show_slope(pe.SLOPES[self.slope.currentIndex()])
+
+    def show_slope(self, slope: int) -> None:
+        """A first-order cut (6 dB) has no Q to set."""
+        self.q.setEnabled(not (self.kind in ("low_cut", "high_cut") and slope == 6))
 
 
 def panel_style() -> str:
@@ -399,6 +431,12 @@ QDoubleSpinBox:focus {{ border: 1px solid {PAL.desk}; }}
 QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{ width: 0; border: none; }}
 QAbstractSpinBox QLineEdit {{ background: transparent; color: {PAL.ink}; border: none; padding: 0; }}
 QDoubleSpinBox:disabled {{ color: {PAL.muted}; background: {PAL.band}; }}
+QComboBox {{ background: {PAL.surface}; color: {PAL.ink}; border: 1px solid {PAL.line}; border-radius: 4px;
+    padding: 3px 6px; font-size: 12px; }}
+QComboBox:focus {{ border: 1px solid {PAL.desk}; }}
+QComboBox::drop-down {{ border: none; width: 16px; }}
+QComboBox QAbstractItemView {{ background: {PAL.surface}; color: {PAL.ink}; border: 1px solid {PAL.line};
+    selection-background-color: {rgba(PAL.desk, 0.3)}; selection-color: {PAL.ink}; outline: none; }}
 """
 
 
@@ -423,7 +461,7 @@ class EqPanel(QWidget):
         grid = QGridLayout()
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(5)
-        for col, text in ((3, "Gain"), (4, "Frequency"), (5, "Q"), (6, "Type")):
+        for col, text in ((3, "Gain / slope"), (4, "Frequency"), (5, "Q"), (6, "Type")):
             head = QLabel(text)
             head.setProperty("role", "eqHead")
             grid.addWidget(head, 0, col)
@@ -434,6 +472,7 @@ class EqPanel(QWidget):
             grid.addWidget(row.on, n, 0)
             grid.addWidget(row.label, n, 1)
             grid.addWidget(row.gain, n, 3)
+            grid.addWidget(row.slope, n, 3)  # the same cell: a cut shows this, the other types the gain box
             grid.addWidget(row.freq, n, 4)
             grid.addWidget(row.q, n, 5)
             kinds = QHBoxLayout()
@@ -445,6 +484,7 @@ class EqPanel(QWidget):
             row.gain.valueChanged.connect(lambda v, n=n: self._put(pe.key(n, "gain"), round(v, 1)))
             row.freq.valueChanged.connect(lambda v, n=n: self._put(pe.key(n, "freq"), v))
             row.q.valueChanged.connect(lambda v, n=n: self._put(pe.key(n, "q"), v))
+            row.slope.currentIndexChanged.connect(lambda i, n=n: self._put(pe.key(n, "slope"), pe.SLOPES[i]))
             for kind, button in row.types.items():
                 button.clicked.connect(lambda _=False, n=n, kind=kind: self._put(pe.key(n, "type"), kind))
         grid.setColumnStretch(7, 1)
@@ -472,6 +512,9 @@ class EqPanel(QWidget):
             row.on.blockSignals(True)
             row.on.setChecked(self.values[pe.key(n, "on")] is True)
             row.on.blockSignals(False)
+            row.slope.blockSignals(True)
+            row.slope.setCurrentIndex(pe.SLOPES.index(pe.snap_slope(self.values.get(pe.key(n, "slope")))))
+            row.slope.blockSignals(False)
             row.show_type(str(self.values[pe.key(n, "type")]))
         self.trim.blockSignals(True)
         self.trim.setValue(float(self.values["trim"]))  # type: ignore[arg-type]
@@ -484,6 +527,12 @@ class EqPanel(QWidget):
         self.values[key] = value
         if key.endswith("_type"):
             self.rows[int(key[1 : key.index("_")]) - 1].show_type(str(value))
+        elif key.endswith("_slope"):
+            row = self.rows[int(key[1 : key.index("_")]) - 1]
+            row.slope.blockSignals(True)
+            row.slope.setCurrentIndex(pe.SLOPES.index(pe.snap_slope(value)))
+            row.slope.blockSignals(False)
+            row.show_slope(pe.snap_slope(value))
         elif key.endswith(("_freq", "_gain", "_q")):  # a drag or the wheel: the box shows it too
             n = int(key[1 : key.index("_")])
             box = {"freq": self.rows[n - 1].freq, "gain": self.rows[n - 1].gain, "q": self.rows[n - 1].q}[

@@ -282,3 +282,68 @@ def test_the_filter_window_shows_the_panel_and_saves_what_it_changes(make, qtbot
     assert (
         FilterSpec(EQ_KIND, "x", True, host.settings.filters[0].settings).settings == host.settings.filters[0].settings
     )
+
+
+# ------------------------------------------------------------------ B014: the slope of a cut
+
+
+@pytest.mark.parametrize("slope", [6, 12, 18, 24])
+@pytest.mark.parametrize("kind", ["low_cut", "high_cut"])
+def test_a_cuts_slope_is_6_12_18_or_24_db_per_octave(kind: str, slope: int) -> None:
+    s = band(5, type=kind, freq=1000.0, q=0.7, slope=slope)
+    near, far = (500.0, 250.0) if kind == "low_cut" else (2000.0, 4000.0)  # one and two octaves into the cut
+    one, two = gain_db(s, near), gain_db(s, far)
+    assert one - two == pytest.approx(slope, abs=1.5)
+    assert two == pytest.approx(-2 * slope, abs=3.0)
+    assert gain_db(s, 1000.0) == pytest.approx(-3.0, abs=1.0)  # Butterworth at the default Q: -3 dB at the cutoff
+
+
+def test_the_default_slope_is_12_and_old_settings_load_as_12() -> None:
+    s = fine_tune.resolve(EQ_KIND, {})
+    assert all(s[pe.key(i, "slope")] == 12 for i in range(1, 11))
+    old = band(1, type="low_cut", freq=200.0, q=0.7)  # saved before B014: no b1_slope
+    assert pe.bands_of(fine_tune.resolve(EQ_KIND, old))[0].slope == 12
+    assert pe.bands_of(fine_tune.resolve(EQ_KIND, {"b1_slope": 7}))[0].slope == 6  # snapped to an allowed one
+    assert gain_db(old, 100.0) == pytest.approx(gain_db({**old, "b1_slope": 12}, 100.0), abs=1e-6)
+
+
+def test_a_slope_change_mid_stream_does_not_click() -> None:
+    from test_dsp import energy_above_db
+
+    tone = (0.2 * np.sin(2 * np.pi * 317 * np.arange(6 * RATE) / RATE)).astype(np.float32)
+    at = len(tone) // 2 // BLOCK * BLOCK
+    for kind in ("low_cut", "high_cut"):
+        for a, b in ((12, 24), (24, 6), (6, 18), (18, 12)):
+            f = eq(**band(5, type=kind, freq=317.0, q=0.7, slope=a))
+            out = [f.process(tone[i : i + BLOCK]) for i in range(0, at, BLOCK)]
+            f.update(band(5, type=kind, freq=317.0, q=0.7, slope=b))
+            out += [f.process(tone[i : i + BLOCK]) for i in range(at, len(tone), BLOCK)]
+            y = np.concatenate(out)
+            assert energy_above_db(y, at + BLOCK // 2) <= -60.0
+            assert [d for d in audio_check.analyze(y.astype(np.float64)) if d.kind in DROPOUTS] == []
+
+
+@pytest.mark.parametrize("slope", [6, 12, 18, 24])
+@pytest.mark.parametrize("kind", ["low_cut", "high_cut"])
+def test_the_graph_matches_the_filter_at_each_slope(kind: str, slope: int) -> None:
+    s = fine_tune.resolve(EQ_KIND, band(5, type=kind, freq=1000.0, q=1.3, slope=slope))
+    for f in (150.0, 500.0, 900.0, 1100.0, 2500.0, 7000.0):
+        assert pe.response_db(s, np.array([f]))[0] == pytest.approx(gain_db(s, f), abs=0.15)
+
+
+def test_the_slope_dropdown_shows_only_for_cuts_and_changes_the_setting(qtbot: QtBot) -> None:
+    p, seen = panel(qtbot)
+    r1, r3 = p.rows[0], p.rows[2]  # band 1 is a low cut, band 3 a bell
+    assert not r1.slope.isHidden() and r1.gain.isHidden()
+    assert r3.slope.isHidden() and not r3.gain.isHidden()
+    assert [r1.slope.itemText(i) for i in range(r1.slope.count())] == ["6 dB", "12 dB", "18 dB", "24 dB"]
+    assert r1.slope.currentText() == "12 dB"
+    r1.slope.setCurrentIndex(3)
+    assert p.values[pe.key(1, "slope")] == 24 and (pe.key(1, "slope"), 24) in seen
+    assert r1.q.isEnabled()
+    r1.slope.setCurrentIndex(0)
+    assert not r1.q.isEnabled()
+    r3.types["high_cut"].click()
+    assert not r3.slope.isHidden() and r3.gain.isHidden()
+    r1.types["bell"].click()
+    assert r1.slope.isHidden() and not r1.gain.isHidden() and r1.q.isEnabled()

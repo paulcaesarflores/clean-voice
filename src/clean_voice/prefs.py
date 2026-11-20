@@ -14,6 +14,8 @@ deleted 7-band EQ) and "tab" (the deleted sidebar's page) are ignored, and are n
 
 "theme" is the window's Light / Dark / Automatic choice (DESIGN "Theme choice", 2026-11-13): "auto", "light" or
 "dark". A file without it, or with any other value, loads as Automatic.
+
+"presets" (B013) are Fine-tune's named chains: {name: a list in the same form as "filters"}. A file without it has none.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import json
 import math
 import os
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -44,6 +47,7 @@ class Prefs:
     output: str | None = None  # None: VB-CABLE
     monitor_volume: float = 100.0  # Hear myself's volume, 0..100 %
     theme: str = "auto"  # a theme.MODES value: Automatic follows the system
+    presets: Mapping[str, tuple[fine_tune.FilterSpec, ...]] = field(default_factory=dict)  # B013: name -> chain
 
 
 def default_path() -> Path:
@@ -72,6 +76,7 @@ def to_json(prefs: Prefs) -> dict[str, Any]:
         "output": prefs.output,
         "monitor_volume": prefs.monitor_volume,
         "theme": prefs.theme,
+        "presets": {name: fine_tune.filters_to_json(chain) for name, chain in prefs.presets.items()},
     }
 
 
@@ -145,4 +150,16 @@ def from_json(data: dict[str, Any]) -> Prefs:
         output=_name(data, "output"),
         monitor_volume=min(100.0, max(0.0, _number(data, "monitor_volume", d.monitor_volume))),
         theme=mode if isinstance(mode := data.get("theme"), str) and mode in theme.MODES else d.theme,
+        presets=_presets(data.get("presets")),
     )
+
+
+def _presets(value: object) -> dict[str, tuple[fine_tune.FilterSpec, ...]]:
+    """Fine-tune's saved presets (B013): {name: a chain as "filters" saves it}. A bad name or chain is dropped."""
+    if not isinstance(value, dict):
+        return {}
+    return {
+        name: fine_tune.filters_from_json(chain)
+        for name, chain in value.items()
+        if isinstance(name, str) and name.strip() and isinstance(chain, list)
+    }

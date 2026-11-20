@@ -5,15 +5,17 @@ Each band is one biquad from the public RBJ "Audio EQ Cookbook" (bell, low and h
 written here from its formulas. ``fine_tune`` builds the filter's properties from the constants below, ``obs_filters``
 runs the biquads, and the filter window's graph draws ``response_db``. Nothing here needs Qt.
 
-A band's settings are flat keys ``b<N>_on``, ``b<N>_type``, ``b<N>_freq``, ``b<N>_gain``, ``b<N>_q`` (N = 1..10) and
-the filter's ``trim``, in dB.
+A band's settings are flat keys ``b<N>_on``, ``b<N>_type``, ``b<N>_freq``, ``b<N>_gain``, ``b<N>_q``, ``b<N>_slope``
+(N = 1..10) and the filter's ``trim``, in dB. The slope (6, 12, 18 or 24 dB per octave) only matters for a low or high
+cut: 6 is a first-order section, 12 one biquad, 18 a first-order section and a biquad, 24 two biquads (B014). Every band
+is always two sections (the unused one is the identity), so the filter's coefficient arrays have a fixed size.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import numpy.typing as npt
@@ -35,6 +37,9 @@ TYPES: tuple[tuple[str, str], ...] = (
     ("high_cut", "High cut"),
     ("notch", "Notch"),
 )
+SLOPES = (6, 12, 18, 24)  # a cut's dB per octave
+DEFAULT_SLOPE = 12
+BUTTERWORTH_Q = 1.0 / math.sqrt(2.0)  # 0.7071: the Q at which a 2nd-order cut is maximally flat
 GAINED = ("bell", "low_shelf", "high_shelf")  # the types whose gain does something
 IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)  # a second-order section that passes audio through unchanged
 # The graph's gridlines (the labels the user asked for; 31 and 62 are the usual names for 32 and 64 Hz).
@@ -57,6 +62,14 @@ class Band:
     freq: float
     gain: float
     q: float
+    slope: int = DEFAULT_SLOPE
+
+
+def snap_slope(value: object) -> int:
+    """``value`` as the nearest allowed slope (12 when it is not a number)."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return DEFAULT_SLOPE
+    return min(SLOPES, key=lambda s: abs(s - value))
 
 
 def bands_of(settings: Mapping[str, object]) -> list[Band]:
@@ -68,6 +81,7 @@ def bands_of(settings: Mapping[str, object]) -> list[Band]:
             float(settings[key(i, "freq")]),  # type: ignore[arg-type]
             float(settings[key(i, "gain")]),  # type: ignore[arg-type]
             float(settings[key(i, "q")]),  # type: ignore[arg-type]
+            snap_slope(settings.get(key(i, "slope"), DEFAULT_SLOPE)),
         )
         for i in range(1, BANDS + 1)
     ]
@@ -107,6 +121,31 @@ def section(band: Band) -> tuple[float, float, float, float, float, float]:
     return (b[0] / a[0], b[1] / a[0], b[2] / a[0], 1.0, a[1] / a[0], a[2] / a[0])
 
 
+def _first_order(kind: str, freq: float) -> tuple[float, float, float, float, float, float]:
+    """A first-order high-pass (low cut) or low-pass (high cut) as a section with no second-order terms: the bilinear
+    transform of 1/(1+s), K = tan(w/2) (the same method as the RBJ biquads)."""
+    k = math.tan(math.pi * min(freq, SAMPLE_RATE * 0.49) / SAMPLE_RATE)
+    a1 = (k - 1.0) / (k + 1.0)
+    if kind == "low_cut":
+        return (1.0 / (1.0 + k), -1.0 / (1.0 + k), 0.0, 1.0, a1, 0.0)
+    return (k / (1.0 + k), k / (1.0 + k), 0.0, 1.0, a1, 0.0)
+
+
+def sections(band: Band) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """The band as exactly two second-order sections. Only a cut's slope changes them: 6 dB is a first-order section,
+    12 one biquad with the band's Q, 18 a first-order section and a biquad, 24 two biquads. For 18 and 24 the Q is
+    scaled so the default Q 0.7 gives a Butterworth cut (flat to the corner, then a clean slope) and a higher Q still
+    adds resonance."""
+    if not band.on or band.type not in ("low_cut", "high_cut") or band.slope == 12:
+        return (section(band), IDENTITY)
+    if band.slope == 6:
+        return (_first_order(band.type, band.freq), IDENTITY)
+    if band.slope == 18:  # biquad Q = Q * (1 / 0.7071): 1.0 at the default, the Butterworth 3rd-order pole pair
+        return (_first_order(band.type, band.freq), section(replace(band, q=band.q / BUTTERWORTH_Q)))
+    first = replace(band, q=0.5412)  # 4th order: pole pairs Q 0.5412 and 1.3066
+    return (section(first), section(replace(band, q=band.q * 1.3066 / BUTTERWORTH_Q)))
+
+
 def section_db(sos: tuple[float, ...], freqs: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
     """One section's gain in dB at ``freqs`` (Hz)."""
     z = np.exp(-2j * np.pi * freqs / SAMPLE_RATE)
@@ -115,7 +154,7 @@ def section_db(sos: tuple[float, ...], freqs: npt.NDArray[np.float64]) -> npt.ND
 
 
 def band_db(band: Band, freqs: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-    return section_db(section(band), freqs)
+    return section_db(sections(band)[0], freqs) + section_db(sections(band)[1], freqs)
 
 
 def response_db(settings: Mapping[str, object], freqs: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:

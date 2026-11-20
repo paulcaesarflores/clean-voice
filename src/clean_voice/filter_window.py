@@ -109,6 +109,23 @@ NVIDIA_MISSING = (
 )
 
 
+PRESET_LABEL = "Preset"  # B013: not in OBS
+PRESET_PLACEHOLDER = "Choose a preset"
+PRESET_TITLE = "Save preset"
+PRESET_TEXT = "Name of the preset:"
+PRESET_EMPTY = ("Type a name", "A preset needs a name.")
+PRESET_REPLACE_TITLE = "Replace preset"
+PRESET_DELETE_TITLE = "Delete preset"
+
+
+def replace_preset_text(name: str) -> str:
+    return f'A preset named "{name}" already exists. Replace it?'
+
+
+def delete_preset_text(name: str) -> str:
+    return f'Delete the preset "{name}"?'
+
+
 def remove_text(name: str) -> str:
     return f'Remove "{name}"?'  # OBS: "Are you sure you wish to remove '%1'?" (QueryRemove :707-722)
 
@@ -146,7 +163,14 @@ class FilterModel:
         loader: Loader = vst.create,
         scanner: Callable[[], list[tuple[str, str]]] = vst.scan,
         folders: Callable[[], Sequence[PurePath]] = vst.search_folders,
+        presets: Callable[[], Mapping[str, tuple[FilterSpec, ...]]] | None = None,
+        store_presets: Callable[[Mapping[str, tuple[FilterSpec, ...]]], None] | None = None,
     ) -> None:
+        """``presets`` reads the saved presets and ``store_presets`` keeps a new set (B013: the app gives the saved
+        choices' ``Prefs.presets``); without them the model keeps its own."""
+        self._own: dict[str, tuple[FilterSpec, ...]] = {}
+        self.presets = presets or (lambda: self._own)
+        self._store_presets = store_presets or self._keep_own
         self._settings = settings
         self._publish = publish
         self.registry = registry
@@ -345,6 +369,40 @@ class FilterModel:
             if plugin is not None:
                 plugin.open_when_active = value is True  # vst_update :102
         return False
+
+    # -------------------------------------------------------------- presets (B013: not in OBS, the user's request)
+
+    def _keep_own(self, presets: Mapping[str, tuple[FilterSpec, ...]]) -> None:
+        self._own = dict(presets)
+
+    def preset_names(self) -> list[str]:
+        return sorted(self.presets(), key=str.casefold)
+
+    def save_preset(self, name: str) -> None:
+        """The whole chain under ``name``: every filter, its order, enabled state and settings, a plug-in's state as
+        the chain saves it (``with_state``). The same name is replaced."""
+        chain = self.with_state(self._settings()).filters
+        self._store_presets({**self.presets(), name: tuple(chain)})
+
+    def delete_preset(self, name: str) -> None:
+        self._store_presets({k: v for k, v in self.presets().items() if k != name})
+
+    def load_preset(self, name: str) -> None:
+        """The saved chain replaces the current one, published like any chain change. Each filter gets a new uid, so
+        the chain builds it fresh and a loaded plug-in is its own instance; the old filters' plug-ins are dropped after
+        the new list is published (as ``_swap_plugin``). A plug-in that won't load leaves its reason in ``errors``."""
+        saved = self.presets().get(name)
+        if saved is None:
+            return
+        fresh = [FilterSpec(f.kind, f.name, f.enabled, f.settings) for f in saved]
+        old = self.filters
+        loaded = [(spec, self._load(spec)) for spec in fresh]
+        self._put(fresh, fine_tune=True)  # Fine-tune turns on, as in ``add``, so the guest hears the preset
+        for spec in old:
+            self._drop(spec.uid)
+        for spec, plugin in loaded:
+            if plugin is not None:
+                vst_editor.open_if_wanted(plugin, spec.name)
 
     def reset(self, uid: int) -> None:
         """Defaults (ResetFilters :1044-1071): the filter's settings cleared, so every one is OBS's default. A VST
@@ -857,6 +915,7 @@ class FilterWindow(QWidget):
         self.resize(*SIZE)
         self.setMinimumSize(*MIN_SIZE)
         self.refresh(select=0)
+        self.show_presets()
 
     # -------------------------------------------------------------- layout
 
@@ -873,6 +932,26 @@ class FilterWindow(QWidget):
         head.setWeight(QFont.Weight.DemiBold)
         title.setFont(head)
         grid.addWidget(title, 0, 0)
+        # B013: the presets row, above the properties pane: a dropdown and Save, Load, Delete.
+        presets = QHBoxLayout()
+        presets.setSpacing(8)
+        presets.addWidget(QLabel(PRESET_LABEL))
+        self.preset_combo = Combo()
+        self.preset_combo.setAccessibleName(PRESET_LABEL)
+        self.preset_combo.setPlaceholderText(PRESET_PLACEHOLDER)
+        presets.addWidget(self.preset_combo, 1)
+        self.preset_save_button = QPushButton("Save")
+        self.preset_load_button = QPushButton("Load")
+        self.preset_delete_button = QPushButton("Delete")
+        for button in (self.preset_save_button, self.preset_load_button, self.preset_delete_button):
+            button.setProperty("role", "btn")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            presets.addWidget(button)
+        self.preset_combo.currentIndexChanged.connect(self._show_preset_buttons)
+        self.preset_save_button.clicked.connect(self.save_preset)
+        self.preset_load_button.clicked.connect(self.load_preset)
+        self.preset_delete_button.clicked.connect(self.delete_preset)
+        grid.addLayout(presets, 0, 1)
         self.list = FilterList()
         self.list.currentRowChanged.connect(self._row_changed)
         self.list.eye_clicked.connect(self._eye_clicked)
@@ -1048,6 +1127,54 @@ class FilterWindow(QWidget):
         self.model.reset(spec.uid)
         self._show_pane(force=True)
 
+    # -------------------------------------------------------------- presets (B013)
+
+    def show_presets(self, select: str | None = None) -> None:
+        """The dropdown again from the model, ``select`` chosen (else nothing)."""
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.clear()
+        names = self.model.preset_names()
+        self.preset_combo.addItems(names)
+        self.preset_combo.setCurrentIndex(names.index(select) if select in names else -1)
+        self.preset_combo.blockSignals(False)
+        self._show_preset_buttons()
+
+    def _show_preset_buttons(self) -> None:
+        """Load and Delete need a preset chosen."""
+        chosen = self.preset_combo.currentIndex() >= 0
+        self.preset_load_button.setEnabled(chosen)
+        self.preset_delete_button.setEnabled(chosen)
+
+    def save_preset(self) -> None:
+        """Ask for a name (the chosen preset's is prefilled), ask before replacing one that exists, store the chain."""
+        taken = self.model.preset_names()
+        while True:
+            name = self.ask_preset_name(self.preset_combo.currentText())
+            if name is None:
+                return
+            name = name.strip()
+            if name:
+                break
+            self.inform(*PRESET_EMPTY)
+        if name in taken and not self.confirm(PRESET_REPLACE_TITLE, replace_preset_text(name)):
+            return
+        self.model.save_preset(name)
+        self.show_presets(select=name)
+
+    def load_preset(self) -> None:
+        name = self.preset_combo.currentText()
+        if self.preset_combo.currentIndex() < 0:
+            return
+        self.model.load_preset(name)
+        self.refresh(select=0)
+
+    def delete_preset(self) -> None:
+        name = self.preset_combo.currentText()
+        if self.preset_combo.currentIndex() < 0 or not self.confirm(PRESET_DELETE_TITLE, delete_preset_text(name)):
+            return
+        self.model.delete_preset(name)
+        self.show_presets()
+
     # -------------------------------------------------------------- the properties pane
 
     def _show_pane(self, force: bool = False) -> None:
@@ -1165,6 +1292,10 @@ class FilterWindow(QWidget):
     def ask_name(self, default: str) -> str | None:
         """NameDialog::AskForName."""
         text, ok = QInputDialog.getText(self, ADD_TITLE, ADD_TEXT, QLineEdit.EchoMode.Normal, default)
+        return text if ok else None
+
+    def ask_preset_name(self, default: str) -> str | None:
+        text, ok = QInputDialog.getText(self, PRESET_TITLE, PRESET_TEXT, QLineEdit.EchoMode.Normal, default)
         return text if ok else None
 
     def inform(self, title: str, text: str) -> None:

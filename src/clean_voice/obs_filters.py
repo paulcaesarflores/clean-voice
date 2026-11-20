@@ -516,14 +516,15 @@ class ParametricEq(Filter):
     """
 
     KIND = fine_tune.EQ_KIND
+    _identity = np.array([pe.IDENTITY, pe.IDENTITY])
 
     def __init__(self, settings: Mapping[str, object] | None = None) -> None:
         from clean_voice import dsp  # dsp builds its fixed compressor on this module
 
         self._length = dsp.RAMP_SAMPLES
-        self._sos: list[tuple[float, ...]] = [pe.IDENTITY] * pe.BANDS
-        self._zi = np.zeros((pe.BANDS, 2))
-        self._fade: list[tuple[tuple[float, ...], F64, int] | None] = [None] * pe.BANDS  # (old sos, old state, done)
+        self._sos = np.tile(np.array([pe.IDENTITY, pe.IDENTITY]), (pe.BANDS, 1, 1))  # (band, section, coefficient)
+        self._zi = np.zeros((pe.BANDS, 2, 2))
+        self._fade: list[tuple[F64, F64, int] | None] = [None] * pe.BANDS  # (old sos, old state, done)
         self._trim = dsp.Ramp(1.0)
         self._started = False
         super().__init__(settings)
@@ -531,11 +532,11 @@ class ParametricEq(Filter):
     def update(self, settings: Mapping[str, object]) -> None:
         super().update(settings)
         for i, band in enumerate(pe.bands_of(self.settings)):
-            new = pe.section(band)
-            if new == self._sos[i]:
+            new = np.array(pe.sections(band))
+            if np.array_equal(new, self._sos[i]):
                 continue
             if self._started:
-                self._fade[i] = (self._sos[i], self._zi[i].copy(), 0)
+                self._fade[i] = (self._sos[i].copy(), self._zi[i].copy(), 0)  # a slope change fades like any other
             self._sos[i] = new
         mul = db_to_mul(self._f("trim"))
         if self._started:
@@ -549,17 +550,15 @@ class ParametricEq(Filter):
         y = x.astype(np.float64)
         for i in range(pe.BANDS):
             fade = self._fade[i]
-            if self._sos[i] == pe.IDENTITY and fade is None:
+            if fade is None and not (self._sos[i] != self._identity).any():
                 self._zi[i] = 0.0  # nothing to carry: an off band starts clean when it comes back
                 continue
-            new, zi = sosfilt(np.array([self._sos[i]]), y, self._zi[i][np.newaxis])
-            self._zi[i] = zi[0]
+            new, self._zi[i] = sosfilt(self._sos[i], y, self._zi[i])
             if fade is None:
                 y = new
                 continue
             old_sos, old_zi, done = fade
-            old, zo = sosfilt(np.array([old_sos]), y, old_zi[np.newaxis])
-            old_zi = zo[0]
+            old, old_zi = sosfilt(old_sos, y, old_zi)
             w = np.minimum((done + np.arange(1, n + 1)) / self._length, 1.0)
             y = old + (new - old) * w
             done += n

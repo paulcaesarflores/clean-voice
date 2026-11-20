@@ -1167,7 +1167,13 @@ class MainWindow(QMainWindow):
         self._save_timer.timeout.connect(self.save_prefs)
         # Fine-tune's list and its VST plug-ins; the filter window opens from Show plugin.
         self.fine = filter_window.FilterModel(
-            lambda: self.prefs.settings, self._send_filters, self.engine.vst, vst_loader, vst_scan
+            lambda: self.prefs.settings,
+            self._send_filters,
+            self.engine.vst,
+            vst_loader,
+            vst_scan,
+            presets=lambda: self.prefs.presets,
+            store_presets=lambda presets: self._change(presets=dict(presets)),  # B013: saved with the usual delay
         )
         self.filter_window: filter_window.FilterWindow | None = None
         self._build()
