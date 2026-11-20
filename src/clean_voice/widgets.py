@@ -20,6 +20,7 @@ from functools import lru_cache
 from PySide6.QtCore import QByteArray, QEvent, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import (
     QColor,
+    QFocusEvent,
     QFont,
     QFontMetricsF,
     QHoverEvent,
@@ -28,9 +29,10 @@ from PySide6.QtGui import (
     QPainter,
     QPaintEvent,
     QPen,
+    QResizeEvent,
 )
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QAbstractButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QAbstractButton, QLineEdit, QSizePolicy, QWidget
 
 from clean_voice import theme
 
@@ -156,6 +158,43 @@ def db_text(db: float) -> str:
 # ------------------------------------------------------------------ BarSlider
 
 
+class _ValueEdit(QLineEdit):
+    """The field a BarSlider's value turns into: Enter or leaving applies, Esc cancels."""
+
+    finished = Signal(bool)  # True: apply what was typed
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setFrame(False)
+        self.setFont(tabular(ui_font(self, 13, QFont.Weight.Medium)))
+        pal = theme.current()
+        self.setStyleSheet(
+            f"QLineEdit {{ background: {pal.surface}; color: {pal.ink}; border: 1px solid {pal.desk};"
+            " border-radius: 4px; padding: 0 4px; }"
+        )
+        self._done = False
+        self.returnPressed.connect(lambda: self._finish(True))
+
+    def _finish(self, apply: bool) -> None:
+        if not self._done:
+            self._done = True
+            self.finished.emit(apply)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self._finish(False)
+            event.accept()
+        elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            super().keyPressEvent(event)  # emits returnPressed, which ends the edit
+            event.accept()  # the slider below must not see this Enter and open the field again
+        else:
+            super().keyPressEvent(event)
+
+    def focusOutEvent(self, event: QFocusEvent) -> None:
+        super().focusOutEvent(event)
+        self._finish(True)
+
+
 class BarSlider(QWidget):
     """A 0..100 slider: the label above, a 3 px track filled in ``desk`` with a 14 px handle, the value on the right
     of the track. It keeps the original's handling (main.js:64-122): click or drag anywhere on the track (left of it
@@ -178,8 +217,12 @@ class BarSlider(QWidget):
         formatter: Callable[[int], str] | None = None,
         compact: bool = False,
         value_width: int | None = None,
+        parse: Callable[[str], float | None] | None = None,
     ) -> None:
         super().__init__(parent)
+        self.parse = parse  # typed text -> slider position (None: not a number); default: the number is the position
+        self.parse_disabled = False  # the caller cannot map typed text to a position right now
+        self._editor: _ValueEdit | None = None
         self.LABEL_H = 0 if compact else type(self).LABEL_H  # compact: one row, the label is the tooltip
         self.VALUE_W = value_width if value_width is not None else (46 if compact else type(self).VALUE_W)
         if compact:
@@ -260,10 +303,70 @@ class BarSlider(QWidget):
         track = self.track_rect()
         return (x - track.left()) / track.width() * 100.0
 
+    # --- typing a value: a click on the value text (or Enter/F2) swaps it for a small field in the same spot.
+    # Clean Voice's own addition (the user asked, 2026-11-20); OBS's volume control has a spin box beside its fader.
+
+    def _on_value(self, event: QMouseEvent) -> bool:
+        pos = event.position()
+        return pos.x() >= self.width() - self.VALUE_W and pos.y() >= self.LABEL_H
+
+    def editing(self) -> bool:
+        return self._editor is not None
+
+    def _typed_position(self, text: str) -> float | None:
+        """The slider position for what the guest typed, or None when it is not a number."""
+        if self.parse is not None:
+            return self.parse(text)
+        try:
+            number = float(text.replace(",", ".").strip())
+        except ValueError:
+            return None
+        return number if math.isfinite(number) else None
+
+    def begin_edit(self) -> None:
+        if self._editor is not None or not self.isEnabled() or self.parse_disabled:
+            return
+        editor = _ValueEdit(self)
+        shown = self.value_text()
+        for unit in (" dB", " %"):
+            shown = shown.removesuffix(unit)
+        editor.setText(shown)
+        editor.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        editor.setAccessibleName(f"{self.label} value")
+        editor.setGeometry(self.width() - self.VALUE_W, self.LABEL_H, self.VALUE_W, self.TRACK_H)
+        editor.finished.connect(self._end_edit)
+        self._editor = editor
+        editor.show()
+        editor.setFocus()
+        editor.selectAll()
+
+    def _end_edit(self, apply: bool) -> None:
+        editor, self._editor = self._editor, None
+        if editor is None:
+            return
+        text = editor.text()
+        editor.hide()
+        editor.setParent(None)  # no longer one of the slider's children; freed later
+        editor.deleteLater()
+        self.setFocus()
+        if apply:
+            position = self._typed_position(text)
+            if position is not None:
+                self._change(position)  # clamps to 0..100 and rounds to the closest position
+        self.update()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        if self._editor is not None:
+            self._editor.setGeometry(self.width() - self.VALUE_W, self.LABEL_H, self.VALUE_W, self.TRACK_H)
+        super().resizeEvent(event)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             return super().mousePressEvent(event)
         if self._on_label(event):  # a click on the name sets nothing (home-gain-labels L1)
+            return
+        if self._on_value(event):  # the value text is for typing, not for dragging
+            self.begin_edit()
             return
         self._dragging = True
         self._sync_cursor()
@@ -309,7 +412,7 @@ class BarSlider(QWidget):
         return self.isEnabled() and (self._dragging or self._hover)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        if self.reset is not None and not self._on_label(event):
+        if self.reset is not None and not self._on_label(event) and not self._on_value(event):
             self._change(self.reset)
 
     @property
@@ -335,6 +438,8 @@ class BarSlider(QWidget):
             self._change(0)
         elif key == int(Qt.Key.Key_End):
             self._change(100)
+        elif key in (int(Qt.Key.Key_Return), int(Qt.Key.Key_Enter), int(Qt.Key.Key_F2)):
+            self.begin_edit()
         else:
             super().keyPressEvent(event)
 

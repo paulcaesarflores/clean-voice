@@ -9,11 +9,13 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QPoint, Qt
+from PySide6.QtWidgets import QLineEdit
 from pytestqt.qtbot import QtBot
 from test_main_screen import DEVICES, MICS, ON, OUTPUTS, FakeLoginItem
 
 from clean_voice import prefs
-from clean_voice.app import CALL_VOLUME_TIP, MIC_LEVEL_FIXED, MIC_LEVEL_TIP, MainWindow
+from clean_voice.app import CALL_VOLUME_TIP, MIC_LEVEL_FIXED, MIC_LEVEL_TIP, MainWindow, monitor_db
+from clean_voice.dsp import loudness_db
 from clean_voice.mic_level import RETRY_S, SystemMicLevel
 from clean_voice.preview import PreviewEngine, sample_states
 from clean_voice.settings import Settings
@@ -373,3 +375,58 @@ def test_the_real_default_mic_level_reads_without_changing_it() -> None:
     finally:
         volume.close()
     assert volume.get() is None  # closed
+
+
+# ------------------------------------------------------------------ typing a value (user request, 2026-11-20)
+
+
+def _type(qtbot: QtBot, slider, text: str) -> None:
+    slider.begin_edit()
+    field = slider.findChild(QLineEdit)
+    field.setText(text)
+    qtbot.keyClick(field, Qt.Key.Key_Return)
+
+
+def test_typing_minus_6_in_voice_volume_lands_on_the_6_db_position(home, qtbot: QtBot) -> None:
+    window, engine, _ = home()
+    _type(qtbot, window.call_volume, "-6")
+    position = window.call_volume.value()
+    assert abs(loudness_db(float(position)) - -6.0) <= min(abs(loudness_db(float(p)) - -6.0) for p in range(101)) + 1e-9
+    assert engine.sent[-1].loudness == position
+
+
+def test_typing_40_in_denoise_strength_sets_the_strength(home, qtbot: QtBot) -> None:
+    window, engine, _ = home()
+    _type(qtbot, window.strength_bar, "40")
+    assert window.strength_bar.value() == 40 and engine.sent[-1].strength == 40.0
+
+
+def test_typing_in_voice_style_strength_uses_0_to_1(home, qtbot: QtBot) -> None:
+    window, _, _ = home()
+    _type(qtbot, window.style_strength_bar, "0.75")
+    assert window.style_strength_bar.value() == 75 and window.style_strength_bar.value_text() == "0.75"
+
+
+def test_typing_in_hear_myself_volume_finds_the_closest_db(home, qtbot: QtBot) -> None:
+    window, _, _ = home()
+    _type(qtbot, window.monitor_volume, "-20")
+    assert abs(monitor_db(window.monitor_volume.value()) - -20.0) < 1.5
+    _type(qtbot, window.monitor_volume, "-inf")
+    assert window.monitor_volume.value() == 0
+
+
+def test_typing_escape_leaves_the_value_and_mic_level_takes_percent(home, qtbot: QtBot) -> None:
+    window, _, fake = home()
+    before = window.strength_bar.value()
+    window.strength_bar.begin_edit()
+    window.strength_bar.findChild(QLineEdit).setText("5")
+    qtbot.keyClick(window.strength_bar.findChild(QLineEdit), Qt.Key.Key_Escape)
+    assert window.strength_bar.value() == before
+    _type(qtbot, window.mic_gain, "30")
+    assert fake.sets[-1] == (MICS[0], pytest.approx(0.30))
+
+
+def test_a_greyed_mic_level_cannot_be_typed_into(home, qtbot: QtBot) -> None:
+    window, _, _ = home({})
+    window.mic_gain.begin_edit()
+    assert not window.mic_gain.editing()

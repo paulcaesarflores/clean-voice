@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QLineEdit, QWidget
 from pytestqt.qtbot import QtBot
 from scipy import signal
 
@@ -64,7 +64,7 @@ def test_w1_a_click_anywhere_sets_the_value(qtbot: QtBot) -> None:
 def test_w1_a_click_beyond_the_ends_clamps(qtbot: QtBot) -> None:
     bar, got = make_bar(qtbot)
     track = bar.track_rect()
-    qtbot.mouseClick(bar, Qt.MouseButton.LeftButton, pos=QPoint(round(track.right()) + 20, 24))  # on the value box
+    qtbot.mouseClick(bar, Qt.MouseButton.LeftButton, pos=QPoint(round(track.right()) + 2, 24))  # past the track end
     assert bar.value() == 100
     qtbot.mouseClick(bar, Qt.MouseButton.LeftButton, pos=QPoint(0, 24))
     assert bar.value() == 0
@@ -206,6 +206,70 @@ def test_w1_the_value_box_width_is_the_callers(qtbot: QtBot) -> None:
     narrow = BarSlider("Voice volume", compact=True, value_width=20, formatter=lambda v: "-12.0 dB")
     show(qtbot, narrow, 300, narrow.height())
     assert narrow.cut_off()  # a readout wider than its box counts as cut off
+
+
+def value_click(bar: BarSlider) -> QPoint:
+    return QPoint(bar.width() - bar.VALUE_W // 2, bar.LABEL_H + bar.TRACK_H // 2)
+
+
+def editor_of(bar: BarSlider) -> QLineEdit:
+    field = bar.findChild(QLineEdit)
+    assert field is not None
+    return field
+
+
+def test_typed_value_click_opens_a_field_with_the_value_and_enter_applies(qtbot: QtBot) -> None:
+    bar, got = make_bar(qtbot, value=50)
+    qtbot.mouseClick(bar, Qt.MouseButton.LeftButton, pos=value_click(bar))
+    assert bar.value() == 50 and bar.editing()  # the click on the value is not a drag to 100
+    field = editor_of(bar)
+    assert field.text() == "50"
+    field.setText("73")
+    qtbot.keyClick(field, Qt.Key.Key_Return)
+    assert (bar.value(), got, bar.editing()) == (73, [73], False)
+
+
+def test_typed_value_clamps_and_leaving_the_field_applies(qtbot: QtBot) -> None:
+    bar, got = make_bar(qtbot, value=50)
+    bar.activateWindow()
+    qtbot.waitUntil(bar.isActiveWindow)
+    bar.begin_edit()
+    editor_of(bar).setText("250")
+    bar.setFocus()  # leaving the field
+    qtbot.waitUntil(lambda: not bar.editing())
+    assert (bar.value(), got) == (100, [100])
+
+
+def test_typed_value_escape_and_bad_text_leave_it_unchanged(qtbot: QtBot) -> None:
+    bar, got = make_bar(qtbot, value=50)
+    bar.begin_edit()
+    editor_of(bar).setText("12")
+    qtbot.keyClick(editor_of(bar), Qt.Key.Key_Escape)
+    assert (bar.value(), got, bar.editing()) == (50, [], False)
+    bar.begin_edit()
+    editor_of(bar).setText("loud")
+    qtbot.keyClick(editor_of(bar), Qt.Key.Key_Return)
+    assert (bar.value(), got, bar.editing()) == (50, [], False)
+
+
+def test_typed_value_keys_open_it_and_a_disabled_slider_does_not(qtbot: QtBot) -> None:
+    bar, _ = make_bar(qtbot)
+    bar.setFocus()
+    qtbot.keyClick(bar, Qt.Key.Key_F2)
+    assert bar.editing()
+    qtbot.keyClick(editor_of(bar), Qt.Key.Key_Escape)
+    qtbot.keyClick(bar, Qt.Key.Key_Return)
+    assert bar.editing()
+    qtbot.keyClick(editor_of(bar), Qt.Key.Key_Escape)
+    bar.setEnabled(False)
+    qtbot.mouseClick(bar, Qt.MouseButton.LeftButton, pos=value_click(bar))
+    assert not bar.editing()
+
+
+def test_typed_value_keeps_double_click_reset_on_the_track(qtbot: QtBot) -> None:
+    bar, _ = make_bar(qtbot, value=20, reset=50)
+    qtbot.mouseDClick(bar, Qt.MouseButton.LeftButton, pos=at(bar, 0.5))
+    assert bar.value() == 50 and not bar.editing()
 
 
 # ------------------------------------------------------------------ W3: PowerButton, StepToggle, ToggleSwitch

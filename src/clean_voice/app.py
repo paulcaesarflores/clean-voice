@@ -388,6 +388,31 @@ def monitor_text(position: int) -> str:
     return db_text(monitor_db(position))
 
 
+def _typed_number(text: str) -> float | None:
+    """What the guest typed as a number, ignoring a unit they may have kept ("-6 dB", "40 %"); "-inf" is -infinity."""
+    cleaned = text.lower().replace(",", ".").replace("db", "").replace("%", "").strip()
+    try:
+        number = float(cleaned)
+    except ValueError:
+        return None
+    return None if math.isnan(number) else number
+
+
+def db_parser(db_at: Callable[[int], float]) -> Callable[[str], float | None]:
+    """Typed dB -> the slider position (0..100) whose dB is closest, scanning through the slider's own mapping."""
+
+    def parse(text: str) -> float | None:
+        number = _typed_number(text)
+        if number is None:
+            return None
+        if number == -math.inf:
+            return 0.0
+        number = max(-1000.0, min(1000.0, number))
+        return float(min(range(101), key=lambda p: abs(db_at(p) - number) if math.isfinite(db_at(p)) else math.inf))
+
+    return parse
+
+
 # ------------------------------------------------------------------ small window-only widgets
 
 
@@ -1328,6 +1353,7 @@ class MainWindow(QMainWindow):
         self.mic_gain = BarSlider("Mic level", value=0, reset=None, formatter=self._mic_gain_text, value_width=VALUE_W)
         self.mic_gain.setToolTip(MIC_LEVEL_FIXED)
         self.mic_gain.setEnabled(False)  # until the first read says the mic has a level
+        self.mic_gain.parse = lambda text: _typed_number(text)  # typed as the "%" the slider shows without a dB
         self.mic_gain.valueChanged.connect(self._mic_gain_changed)
         row.addLayout(self._meter_row(self.in_meter, self.mic_gain), 1)
         step.body.addLayout(row)
@@ -1357,6 +1383,7 @@ class MainWindow(QMainWindow):
         self.monitor_volume = BarSlider(
             "Hear myself volume", reset=100, compact=True, formatter=monitor_text, value_width=VALUE_W
         )
+        self.monitor_volume.parse = db_parser(monitor_db)
         self.monitor_volume.setToolTip(MONITOR_VOLUME_TIP)
         self.monitor_volume.valueChanged.connect(self._monitor_volume_changed)
         right.addWidget(self.monitor_volume, 1)
@@ -1422,6 +1449,7 @@ class MainWindow(QMainWindow):
         self.style_strength_bar = BarSlider(
             "Voice style strength", reset=50, compact=True, formatter=lambda v: f"{v / 100:.2f}"
         )
+        self.style_strength_bar.parse = lambda text: None if (n := _typed_number(text)) is None else n * 100.0
         self.style_strength_bar.setToolTip("How much of the style: 0 leaves your voice as it is, 1 doubles the style")
         self.style_strength_bar.valueChanged.connect(self._style_strength_changed)
         self.style_combo = Dropdown()
@@ -1448,6 +1476,7 @@ class MainWindow(QMainWindow):
         self.out_meter = LevelMeter(clean=True)
         self.out_meter.setToolTip("What your call hears")
         self.call_volume = BarSlider("Voice volume", reset=50, formatter=voice_volume_text, value_width=VALUE_W)
+        self.call_volume.parse = db_parser(lambda p: loudness_db(float(p)))
         self.call_volume.setToolTip(CALL_VOLUME_TIP)
         self.call_volume.valueChanged.connect(self._loudness_changed)
         step.body.addLayout(self._meter_row(self.out_meter, self.call_volume))
@@ -1759,6 +1788,7 @@ class MainWindow(QMainWindow):
             slider.setToolTip(MIC_LEVEL_TIP if ok else MIC_LEVEL_FIXED)
         if db != self._mic_db:
             self._mic_db = db
+            slider.parse_disabled = db is not None  # shown in dB, which has no position map: typing needs the "%"
             slider.refresh_text()
         if level is None:
             slider.set_value(0)  # greyed: nothing of the previous mic's level stays on the handle
