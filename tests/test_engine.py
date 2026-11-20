@@ -758,25 +758,30 @@ def test_the_backup_keeps_wall_time_across_a_mic_loss(make_engine) -> None:
     engine, backend = make_engine([MIC, CABLE])
     engine.start(MIC.name)
     wait_for(lambda: engine.status().state is State.ON)
-    t0 = time.monotonic()
     time.sleep(0.6)
+    t_lost = time.monotonic()
     backend.present.remove(MIC)
     wait_for(lambda: engine.status().state is State.MIC_LOST)
     time.sleep(1.0)
+    t_back = time.monotonic()
     backend.present.append(MIC)
     wait_for(lambda: engine.status().state is State.ON and len(backend.opened) == 2)
+    t_on = time.monotonic()
     time.sleep(0.6)
     files = engine.status().recording_files
     engine.stop()
     wait_for(lambda: engine.status().state is State.OFF)
-    wall = time.monotonic() - t0
+    # The fake mic's 10 ms sleeps run long on a slow runner (CI run 44767110635), so the file is measured against what
+    # the mic delivered plus the silence for the gap, not against the wall clock (as in the cable stall test below).
+    delivered = sum(s.path.in_ring.total_written for s in backend.opened) / 48_000
     assert len(files) == 2
     for f in files:
         with wave.open(str(f), "rb") as w:
             data = np.frombuffer(w.readframes(w.getnframes()), np.uint8)
         samples = data.reshape(-1, 3)
         quiet = ~samples.any(axis=1)
-        assert abs(len(samples) / 48_000 - wall) < 0.3, (len(samples) / 48_000, wall)
+        silence = len(samples) / 48_000 - delivered
+        assert t_back - t_lost - 0.3 <= silence <= t_on - t_lost + 0.3, (silence, t_lost, t_back, t_on)
         # audio, then a run of zeros as long as the gap, then audio again (the clean file may start with a few zeros)
         edges = np.flatnonzero(np.diff(np.concatenate(([0], quiet.astype(np.int8), [0]))))
         longest = max(zip(edges[::2], edges[1::2], strict=True), key=lambda run: run[1] - run[0])
@@ -909,9 +914,11 @@ def test_a_slow_starting_cable_does_not_pile_up_voice(make_engine) -> None:
     path = engine._path
     assert path is not None
     wait_for(lambda: path.cable.callbacks > 20)
+    wait_for(lambda: path.in_ring.total_written >= 0.5 * 48_000)  # the fake mic's pace depends on the runner
     assert path.cable.ring.available() <= int(0.060 * 48_000) + 480, path.cable.ring.available()
     delivered = path.in_ring.total_written / 48_000
-    assert delivered >= 0.5 and engine.status().recording_seconds >= delivered - 0.15
+    assert delivered >= 0.5
+    wait_for(lambda: engine.status().recording_seconds >= delivered - 0.15)  # the writer thread follows the mic
 
 
 class BusyCableBackend(FakeBackend):

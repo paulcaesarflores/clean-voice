@@ -5,7 +5,6 @@ The normal suite simulates minutes of audio; ``-m slow`` runs the full hour (WOR
 
 import logging
 import sys
-import threading
 import time
 from itertools import pairwise
 from pathlib import Path
@@ -675,7 +674,7 @@ def test_a_new_sink_does_not_add_buffering_for_old_underruns() -> None:
 def test_a_stalled_backup_write_does_not_underrun_the_cable(tmp_path: Path) -> None:
     # B002 item 12 (E-5): the backup is written on its own thread (plugins/obs-ffmpeg/obs-ffmpeg-output.c
     # write_thread), so a 0.3 s disk stall never reaches the cable's worker.
-    def run(stall_s: float) -> int:
+    def run(stall_s: float) -> tuple[int, float]:
         rec = Recorder(tmp_path / f"stall{stall_s}")
         real, calls = rec.clean.write, [0]
 
@@ -687,29 +686,22 @@ def test_a_stalled_backup_write_does_not_underrun_the_cable(tmp_path: Path) -> N
 
         rec.clean.write = write  # type: ignore[method-assign]
         path = AudioPath(48_000, 1, 48_000, 2, PassThrough(), recorder=rec)
-        stop = threading.Event()
-
-        def device() -> None:  # the cable's callback thread, every 10 ms
-            out = np.zeros((480, 2), np.float32)
-            nxt = time.perf_counter()
-            while not stop.is_set():
-                path.output_callback(out, 480, None, None)
-                nxt += 0.010
-                time.sleep(max(0.0, nxt - time.perf_counter()))
-
-        th = threading.Thread(target=device)
-        th.start()
         block = np.full((480, 1), 0.1, np.float32)
-        nxt = time.perf_counter()
-        for _ in range(200):  # 2 s of mic, in real time
+        out = np.zeros((480, 2), np.float32)
+        slowest = 0.0
+        # One loop drives the mic and the cable in step (what the engine's two device threads do on average), so a slow
+        # runner's scheduling jitter cannot starve the cable; only a worker held up by the writer can.
+        for _ in range(200):  # 2 s of mic
             path.input_callback(block, 480, None, None)
+            t = time.perf_counter()
             path.process()
-            nxt += 0.010
-            time.sleep(max(0.0, nxt - time.perf_counter()))
-        stop.set()
-        th.join()
+            slowest = max(slowest, time.perf_counter() - t)
+            path.output_callback(out, 480, None, None)
+            time.sleep(0.010)
         rec.close()
-        return path.counters.underruns
+        return path.counters.underruns, slowest
 
-    assert run(0.0) == 0  # the control
-    assert run(0.3) == 0
+    assert run(0.0)[0] == 0  # the control
+    underruns, slowest = run(0.3)
+    assert underruns == 0
+    assert slowest < 0.2, slowest  # the 0.3 s write stall never reached the worker

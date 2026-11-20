@@ -198,12 +198,18 @@ CHILD = textwrap.dedent(
     rec = Recorder(Path(sys.argv[1]))
     n = 0
     t = np.arange(480)
+    printed = 0
     while True:
         tone = (0.5 * np.sin(2 * np.pi * 440 * (t + n) / 48000)).astype(np.float32)
         rec.write(tone, tone * 0.5)
         n += 480
-        if n % 48000 == 0:
-            print(n, flush=True)  # one second of audio written (and flushed)
+        # The files are written on the recorder's own thread, so print only the seconds that reached the disk.
+        # frames_flushed moves before the header is rewritten, so a flush is reported only once the next one began.
+        flushed = min(rec.clean.frames_flushed, rec.raw.frames_flushed) // 48000 * 48000
+        if flushed > printed:
+            if printed:
+                print(printed, flush=True)
+            printed = flushed
         time.sleep(0.0005)
     """
 )
