@@ -1188,3 +1188,33 @@ def test_a_denied_mic_permission_shows_mic_denied_and_recovers(make_engine, monk
     answer[0] = None  # unknown never blocks
     engine.start(MIC.name)
     wait_for(lambda: engine.status().state is State.ON)
+
+
+def test_a_fresh_output_stamps_its_callbacks_like_the_loopback_stream() -> None:
+    # B003 r1 #1: sinks time their ring against PortAudio's current_time (audio_path.callback_time), not the DAC time.
+    pa = FakePyAudio(FakePyAudioModule([]))
+    seen: list[float] = []
+
+    def callback(out: np.ndarray, frames: int, t: object, status: int) -> None:
+        seen.append(t.currentTime)  # type: ignore[attr-defined]
+        out[:] = 0.5
+
+    devices._PyAudioOutput(pa, FakePyAudioModule([]), 1, 48_000, 2, callback)  # type: ignore[arg-type]
+    data, _ = pa.opened[0]["stream_callback"](None, 480, {"current_time": 5.0, "output_buffer_dac_time": 5.1}, 0)
+    assert seen == [5.0]
+    assert np.frombuffer(data, np.float32).tolist() == [0.5] * 960
+
+
+def test_a_failed_fresh_listing_terminates_the_new_instance(monkeypatch) -> None:
+    # B003 r1 #3: the PyAudio made for the listing is not left running when the listing raises.
+    backend = object.__new__(devices.SoundDeviceBackend)
+    module = FakePyAudioModule(["Headset"])
+    backend._pyaudio = module  # type: ignore[attr-defined]
+    backend._fresh = []  # type: ignore[attr-defined]
+
+    def boom(self: FakePyAudio) -> list:
+        raise OSError("no loopback")
+
+    monkeypatch.setattr(FakePyAudio, "get_loopback_device_info_generator", boom)
+    assert backend._fresh_speakers("Headset") is None  # type: ignore[attr-defined]
+    assert module.instances[0].terminated

@@ -254,7 +254,7 @@ class _PyAudioOutput:
         self._stream.start_stream()
 
     def _on_audio(self, in_data: bytes | None, frames: int, time_info: dict[str, float], status: int) -> Any:
-        self._time.currentTime = time_info.get("output_buffer_dac_time", 0.0)
+        self._time.currentTime = time_info.get("current_time", 0.0)  # as _LoopbackStream (audio_path.callback_time)
         if len(self._out) < frames:
             self._out = np.zeros((frames, self._channels), np.float32)
         out = self._out[:frames]
@@ -348,6 +348,7 @@ class SoundDeviceBackend:
         else:
             if self._pyaudio is None:
                 return None
+            pa = None
             try:
                 pa = self._pyaudio.PyAudio()
                 wasapi = pa.get_host_api_info_by_type(self._pyaudio.paWASAPI)["index"]
@@ -359,6 +360,8 @@ class SoundDeviceBackend:
                 loop = {d["name"].removesuffix(" [Loopback]"): d for d in pa.get_loopback_device_info_generator()}
             except Exception:
                 log.warning("fresh device listing failed", exc_info=True)
+                if pa is not None:
+                    pa.terminate()
                 return None
             if info is None:
                 pa.terminate()
