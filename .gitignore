@@ -47,3 +47,6 @@ logs/
 # OS clutter
 .DS_Store
 Thumbs.db
+
+# Voice styles VST2 plugin for the user's own OBS (J11): local only, never committed or shipped (user decision)
+/vst-styles/
