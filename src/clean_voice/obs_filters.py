@@ -27,6 +27,7 @@ import numpy as np
 import numpy.typing as npt
 
 from clean_voice import fine_tune, nvafx
+from clean_voice import parametric_eq as pe
 from clean_voice.filters import sosfilt
 from clean_voice.ring import Ring
 
@@ -504,6 +505,71 @@ class VoiceStyle(Filter):
         return self._eq.process(x)
 
 
+class ParametricEq(Filter):
+    """Clean Voice's own 10-band parametric EQ (B012; OBS has only the 3-band eq-filter.c): ten RBJ biquads in series
+    (``parametric_eq``), then the output trim. An off band is the identity, so with every band off and the trim at 0 the
+    output is the input, bit for bit.
+
+    A change is click-free the way ``dsp.Equalizer`` makes one: the band runs its old and its new coefficients from the
+    same state and the output crossfades over ``dsp.RAMP_SAMPLES`` (10 ms), whatever the block size; the trim is a
+    ``dsp.Ramp``. A second change while one is fading starts a new fade from the coefficients then running.
+    """
+
+    KIND = fine_tune.EQ_KIND
+
+    def __init__(self, settings: Mapping[str, object] | None = None) -> None:
+        from clean_voice import dsp  # dsp builds its fixed compressor on this module
+
+        self._length = dsp.RAMP_SAMPLES
+        self._sos: list[tuple[float, ...]] = [pe.IDENTITY] * pe.BANDS
+        self._zi = np.zeros((pe.BANDS, 2))
+        self._fade: list[tuple[tuple[float, ...], F64, int] | None] = [None] * pe.BANDS  # (old sos, old state, done)
+        self._trim = dsp.Ramp(1.0)
+        self._started = False
+        super().__init__(settings)
+
+    def update(self, settings: Mapping[str, object]) -> None:
+        super().update(settings)
+        for i, band in enumerate(pe.bands_of(self.settings)):
+            new = pe.section(band)
+            if new == self._sos[i]:
+                continue
+            if self._started:
+                self._fade[i] = (self._sos[i], self._zi[i].copy(), 0)
+            self._sos[i] = new
+        mul = db_to_mul(self._f("trim"))
+        if self._started:
+            self._trim.set(mul)
+        else:
+            self._trim.value = self._trim.target = mul  # the first settings are in place, not ramped to
+            self._started = True
+
+    def process(self, x: Audio) -> Audio:
+        n = len(x)
+        y = x.astype(np.float64)
+        for i in range(pe.BANDS):
+            fade = self._fade[i]
+            if self._sos[i] == pe.IDENTITY and fade is None:
+                self._zi[i] = 0.0  # nothing to carry: an off band starts clean when it comes back
+                continue
+            new, zi = sosfilt(np.array([self._sos[i]]), y, self._zi[i][np.newaxis])
+            self._zi[i] = zi[0]
+            if fade is None:
+                y = new
+                continue
+            old_sos, old_zi, done = fade
+            old, zo = sosfilt(np.array([old_sos]), y, old_zi[np.newaxis])
+            old_zi = zo[0]
+            w = np.minimum((done + np.arange(1, n + 1)) / self._length, 1.0)
+            y = old + (new - old) * w
+            done += n
+            self._fade[i] = None if done >= self._length else (old_sos, old_zi, done)
+        g = self._trim.gains(n)
+        if not isinstance(g, float) or g != 1.0:
+            y = y * g
+        return y.astype(np.float32)
+
+
 class NvidiaAudioEffects(Filter):
     """NVIDIA Audio Effects: noise removal, room echo removal, or both, on NVIDIA's runtime (J12), mono at 48 kHz.
 
@@ -594,6 +660,7 @@ CLASSES: dict[str, type[Filter]] = {
     for c in (
         Denoise,
         VoiceStyle,
+        ParametricEq,
         NvidiaAudioEffects,
         ThreeBandEq,
         Compressor,

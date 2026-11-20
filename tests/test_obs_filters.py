@@ -126,7 +126,12 @@ def test_t1_every_kind_has_obs_defaults_and_ranges(kind: str) -> None:
 
 
 def test_t1_names_menu_order_and_vst_keys() -> None:
-    assert [KINDS[k].name for k in fine_tune.MENU_ORDER] == ["Denoise", "Voice Style", *MENU]  # J13: Clean Voice's own
+    assert [KINDS[k].name for k in fine_tune.MENU_ORDER] == [
+        "Denoise",
+        "Voice Style",
+        "10-Band EQ",
+        *MENU,
+    ]  # J13, B012: Clean Voice's own
     vst = KINDS["vst_filter"]
     assert [p.key for p in vst.props] == [
         "plugin_path",

@@ -10,7 +10,7 @@ from speech import RATE, looped_noise, read_wav, speech
 
 from clean_voice import dsp, fine_tune, obs_filters, prefs
 from clean_voice.dsp import Chain, Equalizer, FineTune, RumbleFilter
-from clean_voice.fine_tune import DENOISE_KIND, STYLE_KIND, FilterSpec, new_filter
+from clean_voice.fine_tune import DENOISE_KIND, EQ_KIND, STYLE_KIND, FilterSpec, new_filter
 from clean_voice.prefs import Prefs
 from clean_voice.settings import STYLE_STRENGTH, Settings, SettingsCell, replace, style_bands
 from clean_voice.styles import PRESETS
@@ -53,8 +53,8 @@ def test_step_2_wording_defaults_and_ranges() -> None:
 
 
 def test_menu_order_puts_clean_voices_two_first() -> None:
-    assert fine_tune.MENU_ORDER[:3] == (DENOISE_KIND, STYLE_KIND, "basic_eq_filter")
-    assert len(fine_tune.MENU_ORDER) == 13 and len(set(fine_tune.MENU_ORDER)) == 13  # J12 added NVIDIA Audio Effects
+    assert fine_tune.MENU_ORDER[:4] == (DENOISE_KIND, STYLE_KIND, EQ_KIND, "basic_eq_filter")
+    assert len(fine_tune.MENU_ORDER) == 14 and len(set(fine_tune.MENU_ORDER)) == 14  # J12 NVIDIA, B012 the 10-band EQ
 
 
 # ------------------------------------------------------------------ Denoise equals Step 2's Denoise stage

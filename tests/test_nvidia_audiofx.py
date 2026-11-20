@@ -223,7 +223,7 @@ def test_settings_out_of_range_or_wrong_are_cleaned_like_any_filter() -> None:
 def test_the_menu_position_is_after_limiter_and_before_noise_gate() -> None:
     names = [fine_tune.KINDS[k].name for k in fine_tune.MENU_ORDER]
     assert names[names.index("Limiter") + 1 : names.index("Limiter") + 3] == ["NVIDIA Audio Effects", "Noise Gate"]
-    assert fine_tune.MENU_ORDER[:2] == fine_tune.OWN_KINDS  # below Clean Voice's own two, which stay first
+    assert fine_tune.MENU_ORDER[: len(fine_tune.OWN_KINDS)] == fine_tune.OWN_KINDS  # below Clean Voice's own, first
     assert NVIDIA_KIND not in fine_tune.menu_order(False)
     assert fine_tune.menu_order(True) == fine_tune.MENU_ORDER
     assert [k for k in fine_tune.MENU_ORDER if k != NVIDIA_KIND] == list(fine_tune.menu_order(False))
@@ -265,7 +265,7 @@ def menu_names(window: FilterWindow) -> list[str]:
 def test_the_menu_offers_the_filter_when_the_runtime_is_found(make_window: Any) -> None:
     window, _ = make_window(STAND_IN)
     names = menu_names(window)
-    assert names[:2] == ["Denoise", "Voice Style"] and window.add_menu.actions()[2].isSeparator()
+    assert names[:3] == ["Denoise", "Voice Style", "10-Band EQ"] and window.add_menu.actions()[3].isSeparator()
     i = names.index("Limiter")
     assert names[i : i + 3] == ["Limiter", "NVIDIA Audio Effects", "Noise Gate"]
     assert [a.data() for a in window.add_menu.actions() if not a.isSeparator()] == list(fine_tune.MENU_ORDER)
@@ -275,7 +275,7 @@ def test_the_menu_has_no_filter_without_the_runtime(make_window: Any) -> None:
     window, _ = make_window(None)
     names = menu_names(window)
     assert "NVIDIA Audio Effects" not in names
-    assert len(names) == len(fine_tune.MENU_ORDER) - 1 == 12
+    assert len(names) == len(fine_tune.MENU_ORDER) - 1 == 13
     assert [a.data() for a in window.add_menu.actions() if not a.isSeparator()] == list(fine_tune.menu_order(False))
 
 

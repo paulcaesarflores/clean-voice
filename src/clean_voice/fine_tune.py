@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from clean_voice import parametric_eq as pe
 from clean_voice.styles import PRESETS
 
 Value = float | int | str | bool
@@ -89,7 +90,25 @@ def _ratio(lo: float, hi: float, step: float, default: float) -> Prop:
 
 DENOISE_KIND = "clean_voice_denoise_filter"
 STYLE_KIND = "clean_voice_style_filter"
-OWN_KINDS: tuple[str, ...] = (DENOISE_KIND, STYLE_KIND)  # Clean Voice's own (J13): OBS has no such filters
+EQ_KIND = "clean_voice_eq_filter"
+OWN_KINDS: tuple[str, ...] = (DENOISE_KIND, STYLE_KIND, EQ_KIND)  # Clean Voice's own (J13, B012): not in OBS
+
+
+def _eq_props() -> tuple[Prop, ...]:
+    """The 10-band EQ's properties: each band's on, type, freq, gain and Q, then the output trim (parametric_eq)."""
+    out: list[Prop] = []
+    for i in range(1, pe.BANDS + 1):
+        out += [
+            Prop(pe.key(i, "on"), f"Band {i}", CHECKBOX, False),
+            Prop(pe.key(i, "type"), f"Band {i} type", LIST, pe.default_type(i), options=pe.TYPES),
+            Prop(pe.key(i, "freq"), f"Band {i} frequency", SLIDER, pe.FREQS[i - 1], *pe.FREQ_RANGE, 1.0, " Hz"),
+            Prop(pe.key(i, "gain"), f"Band {i} gain", SLIDER, 0.0, *pe.GAIN_RANGE, 0.1, " dB"),
+            Prop(pe.key(i, "q"), f"Band {i} Q", SLIDER, pe.DEFAULT_Q, *pe.Q_RANGE, 0.1),
+        ]
+    out.append(Prop("trim", "Output", SLIDER, 0.0, *pe.TRIM_RANGE, 0.1, " dB"))
+    return tuple(out)
+
+
 NVIDIA_KIND = (
     "nvidia_audiofx_filter"  # J12: OBS's NVIDIA Audio Effects; offered only where NVIDIA's runtime is installed
 )
@@ -113,6 +132,13 @@ KINDS: dict[str, Kind] = {
                 Prop("strength", "Strength", SLIDER, 0.5, 0.0, 1.0, 0.01),
             ),
             "Clean Voice's own (DESIGN J13): settings.py style_bands and dsp.py Equalizer",
+        ),
+        Kind(
+            EQ_KIND,
+            "10-Band EQ",
+            _eq_props(),
+            "Clean Voice's own (B012): parametric_eq.py, RBJ Audio EQ Cookbook biquads; OBS has only the 3-band "
+            "plugins/obs-filters/eq-filter.c",
         ),
         Kind(
             "basic_eq_filter",

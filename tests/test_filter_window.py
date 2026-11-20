@@ -159,9 +159,9 @@ def row_point(window: FilterWindow, row: int, x: int) -> QPoint:
 def test_the_add_menu_lists_clean_voices_two_then_obss_ten_kinds_in_obss_order(make) -> None:
     window, _ = make()
     actions = window.add_menu.actions()
-    assert actions[2].isSeparator()  # J13: Denoise, Voice Style, a separator, then OBS's
+    assert actions[3].isSeparator()  # J13, B012: Denoise, Voice Style, 10-Band EQ, a separator, then OBS's
     filters = [a for a in actions if not a.isSeparator()]
-    assert [a.text() for a in filters] == ["Denoise", "Voice Style", *OBS_MENU]
+    assert [a.text() for a in filters] == ["Denoise", "Voice Style", "10-Band EQ", *OBS_MENU]
     assert [a.data() for a in filters] == list(fine_tune.menu_order(False))  # no NVIDIA runtime: no NVIDIA filter
     assert sorted(a.data() for a in filters) == sorted(set(KINDS) - {fine_tune.NVIDIA_KIND})  # each once
 
@@ -301,6 +301,9 @@ def test_t32_each_kinds_pane_has_obss_controls(make, kind: str) -> None:
     pane = window.pane
     assert pane is not None
     spec = host.settings.filters[0]
+    if kind == fine_tune.EQ_KIND:  # the 10-band EQ is one panel of its own (test_parametric_eq)
+        assert list(pane.controls) == ["eq"]
+        return
     shown = [p for p in KINDS[kind].props if p.widget != HIDDEN]
     assert list(pane.controls) == [p.key for p in shown]
     for prop in shown:

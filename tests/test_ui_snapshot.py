@@ -50,6 +50,7 @@ FILTER_STATES = [
     "filters-empty",
     "filters-clean-voice-denoise",
     "filters-clean-voice-style",
+    "filters-clean-voice-eq",
     "filters-basic-eq",
     "filters-compressor",
     "filters-expander",
@@ -85,8 +86,9 @@ def test_renders_every_filter_window_state_light_and_dark(tmp_path: Path) -> Non
     for name in FILTER_STATES:
         for stem in (name, f"{name}-dark"):
             one, two = QImage(str(tmp_path / f"{stem}.png")), QImage(str(tmp_path / f"{stem}@2x.png"))
-            assert one.size().toTuple() == filter_window.SIZE, stem
-            assert two.size().toTuple() == (2 * filter_window.SIZE[0], 2 * filter_window.SIZE[1]), stem
+            size = filter_window.EQ_SIZE if name == "filters-clean-voice-eq" else filter_window.SIZE  # B012: it grows
+            assert one.size().toTuple() == size, stem
+            assert two.size().toTuple() == (2 * size[0], 2 * size[1]), stem
         light, dark = QImage(str(tmp_path / f"{name}.png")), QImage(str(tmp_path / f"{name}-dark.png"))
         assert light.pixelColor(5, 5).lightness() > dark.pixelColor(5, 5).lightness()
     # The + menu and the question are drawn over the window where they open.

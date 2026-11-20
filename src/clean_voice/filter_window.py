@@ -69,6 +69,7 @@ from PySide6.QtWidgets import (
 )
 
 from clean_voice import fine_tune, fonts, nvafx, theme, vst, vst_editor
+from clean_voice.eq_panel import EqPanel
 from clean_voice.fine_tune import BUTTON, CHECKBOX, HIDDEN, INT, KINDS, LIST, SLIDER, FilterSpec, Prop
 from clean_voice.settings import Settings, replace
 from clean_voice.theme import Palette
@@ -80,6 +81,7 @@ TITLE = "Fine-tune filters"  # OBS: "Filters for '%1'" (frontend/data/locale/en-
 LIST_TITLE = "Filters"  # OBS: "Audio Filters" (OBSBasicFilters.cpp:114-116)
 SIZE = (720, 480)
 MIN_SIZE = (600, 380)
+EQ_SIZE = (1000, 760)  # what the 10-band EQ's panel is shown in (B012)
 LIST_W = 240
 EMPTY_TEXT = "Add a filter with +. The filters run from the top of the list down."
 NO_PROPERTIES = "This filter has no settings."  # OBS: "No properties available" (properties-view.cpp:160-163)
@@ -521,9 +523,18 @@ class Pane(QWidget):
         shown = [p for p in kind.props if p.widget != HIDDEN]
         if nvidia and runtime is None:
             shown = []  # a missing module has no properties (nvidia_audio_properties :834 adds the list only if found)
+        own_eq = spec.kind == fine_tune.EQ_KIND
+        if own_eq:  # the 10-band EQ draws its own panel (B012) instead of one form row per property
+            shown = []
+            eq = EqPanel(spec.settings)
+            eq.changed.connect(self._emit)
+            self.controls["eq"] = eq
+            form.addRow(eq)
         for prop in shown:
             self._add(prop, plugins)
-        if nvidia and runtime is None:
+        if own_eq:
+            pass
+        elif nvidia and runtime is None:
             self._text(NVIDIA_MISSING)
         elif kind.note:
             self._text(kind.note)
@@ -1074,6 +1085,8 @@ class FilterWindow(QWidget):
             pane.clicked.connect(self._button_clicked)
             self.pane = pane
             column.addWidget(pane)
+            if spec.kind == fine_tune.EQ_KIND:  # the EQ's graph and ten rows need room: the window grows, never shrinks
+                self.resize(max(self.width(), EQ_SIZE[0]), max(self.height(), EQ_SIZE[1]))
             if spec.kind == vst.KIND:
                 self.show_vst_state()
         column.addStretch(1)
