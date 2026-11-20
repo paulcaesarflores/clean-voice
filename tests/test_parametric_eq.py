@@ -471,3 +471,36 @@ def test_the_dropdowns_show_a_down_arrow(qtbot: QtBot) -> None:
         ]
         bg = image.pixelColor(image.width() - 3, 2)
         assert any(abs(c.lightness() - bg.lightness()) > 30 for c in far_right)  # the chevron is drawn there
+
+
+def test_the_wheel_over_a_cuts_dot_leaves_its_q_alone(qtbot: QtBot) -> None:
+    p, seen = panel(qtbot, **band(6, q=1.0), **band(5, type="low_cut", freq=500.0, q=1.0))
+    pos = p.graph.dot_pos(5)
+    ev = wheel(p, pos, 120)
+    assert p.values[pe.key(5, "q")] == 1.0 and not ev.isAccepted()
+    assert not [k for k, _ in seen if k == pe.key(5, "q")]
+    wheel(p, p.graph.dot_pos(6), 120)  # a bell's Q still turns
+    assert float(p.values[pe.key(6, "q")]) > 1.0
+
+
+def test_the_eq_window_with_its_frame_stays_inside_the_available_area(
+    make,  # noqa: F811
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    available = QRect(0, 0, 1280, 680)
+
+    class FakeScreen:
+        def availableGeometry(self) -> QRect:  # QScreen's name
+            return available
+
+    window, _ = make(Settings(fine_tune=True, filters=(new_filter(EQ_KIND, ()),)))
+    window.hide()
+    monkeypatch.setattr(window, "screen", lambda: FakeScreen())
+    monkeypatch.setattr(window, "frameGeometry", lambda: window.geometry().adjusted(-9, -32, 9, 9))  # a title bar
+    window.show()
+    qtbot.waitExposed(window)
+    QApplication.processEvents()
+    outer = window.frameGeometry()
+    assert outer.height() <= available.height() and outer.width() <= available.width()
+    assert outer.height() == available.height()  # and it uses the room it has

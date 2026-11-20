@@ -173,6 +173,9 @@ class EqGraph(QWidget):
         if i is None:
             event.ignore()  # not over a dot: the wheel scrolls the pane
             return
+        if self.band(i).type in ("low_cut", "high_cut"):
+            event.ignore()  # a cut's slope fixes its response: there is no Q to turn
+            return
         q = self.band(i).q * WHEEL_Q ** (event.angleDelta().y() / 120.0)
         self.q_turned.emit(i, round(_clamp(q, *pe.Q_RANGE), 2))
         event.accept()
