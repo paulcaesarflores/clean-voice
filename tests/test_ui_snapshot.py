@@ -48,6 +48,8 @@ STATES = [  # J10 plan §7, States and their look
 # failing and none found, the + menu, the remove question and a rename.
 FILTER_STATES = [
     "filters-empty",
+    "filters-clean-voice-denoise",
+    "filters-clean-voice-style",
     "filters-basic-eq",
     "filters-compressor",
     "filters-expander",

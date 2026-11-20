@@ -14,6 +14,7 @@ import math
 from dataclasses import dataclass, field
 
 from clean_voice.fine_tune import FilterSpec
+from clean_voice.styles import PRESETS
 
 FREQ_RANGE = (20.0, 20_000.0)  # dsp.rs:117
 GAIN_RANGE = (-18.0, 18.0)  # dsp.rs:118
@@ -43,24 +44,8 @@ class Band:
         object.__setattr__(self, "q", _clamp(self.q, *Q_RANGE, "q"))
 
 
-@dataclass(frozen=True)
-class Preset:
-    name: str
-    gains: tuple[float, float, float, float, float]
-
-
 # main.js:128-134, equal to dsp.rs:127-133 DEFAULT_EQ's frequencies and Q.
 BASE: tuple[tuple[float, float], ...] = ((100.0, 0.7), (300.0, 1.0), (1000.0, 1.0), (3500.0, 0.8), (8000.0, 0.7))
-
-# main.js:136-143: the names and gains. The styles carry no description (user decision, J07 round 4).
-PRESETS: dict[str, Preset] = {
-    "natural": Preset("Natural", (0.0, -2.0, 0.0, 2.5, 1.5)),
-    "warm": Preset("Warm", (3.0, 0.5, -1.0, 1.0, -1.0)),
-    "crisp": Preset("Crisp", (-1.5, -3.0, 0.0, 4.0, 4.0)),
-    "radio": Preset("Radio", (4.0, -3.0, 1.0, 4.0, 2.5)),
-    "deep": Preset("Deep", (6.0, 1.5, -1.0, 1.0, 0.0)),
-    "flat": Preset("Flat", (0.0, 0.0, 0.0, 0.0, 0.0)),
-}
 
 
 def bands_for(preset: str) -> tuple[Band, ...]:

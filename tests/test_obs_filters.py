@@ -125,7 +125,7 @@ def test_t1_every_kind_has_obs_defaults_and_ranges(kind: str) -> None:
 
 
 def test_t1_names_menu_order_and_vst_keys() -> None:
-    assert [KINDS[k].name for k in fine_tune.MENU_ORDER] == MENU
+    assert [KINDS[k].name for k in fine_tune.MENU_ORDER] == ["Denoise", "Voice Style", *MENU]  # J13: Clean Voice's own
     vst = KINDS["vst_filter"]
     assert [p.key for p in vst.props] == [
         "plugin_path",
@@ -144,7 +144,7 @@ def test_t1_names_menu_order_and_vst_keys() -> None:
     assert KINDS["expander_filter"].prop("detector").options == (("RMS", "RMS"), ("peak", "Peak"))
     assert KINDS["noise_suppress_filter"].note == "RNNoise (good quality, more CPU usage)"
     for k in KINDS.values():
-        assert k.cite.startswith("plugins/"), k.id
+        assert k.cite.startswith("Clean Voice's own" if k.id in fine_tune.OWN_KINDS else "plugins/"), k.id
 
 
 def test_t1_out_of_range_values_clamp() -> None:

@@ -145,7 +145,8 @@ def test_style_strength_scales_the_style_gains() -> None:
 
 def test_style_strength_clamps_to_the_eq_range(monkeypatch) -> None:
     from clean_voice import settings
-    from clean_voice.settings import Preset, style_bands
+    from clean_voice.settings import style_bands
+    from clean_voice.styles import Preset
 
     monkeypatch.setitem(settings.PRESETS, "loud", Preset("Loud", (12.0, -14.0, 0.0, 0.0, 0.0)))
     assert [b.gain for b in style_bands("loud", 1.0)][:2] == [18.0, -18.0]

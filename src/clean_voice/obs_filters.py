@@ -449,9 +449,65 @@ class NoiseSuppression(Filter):
         return self._rnnoise.process(x)
 
 
+class Denoise(Filter):
+    """Clean Voice's own Denoise filter (DESIGN J13; OBS has none): the chain's Denoise stage, RNNoise and the
+    Strength mix, ``dsp.Chain``'s own parts: ``NoiseSuppressor``, ``strength_mix``, the 10 ms ``Ramp`` on a change and
+    the dry path delayed by RNNoise's latency. Fully wet at Strength 100. ``block`` is as for ``NoiseSuppression``."""
+
+    KIND = fine_tune.DENOISE_KIND
+
+    def __init__(self, settings: Mapping[str, object] | None = None, block: int | None = 480) -> None:
+        from clean_voice import dsp  # dsp builds its fixed compressor on this module
+
+        self._rnnoise = dsp.NoiseSuppressor(block)
+        self.latency = self._rnnoise.latency + dsp.Chain.RNNOISE_LATENCY  # the wet output's delay, dry matches it
+        self._dry = dsp.Delay(self.latency)
+        self._mix = dsp.Ramp(dsp.strength_mix(float(fine_tune.resolve(self.KIND, settings)["strength"])))  # type: ignore[arg-type]
+        super().__init__(settings)
+
+    def update(self, settings: Mapping[str, object]) -> None:
+        from clean_voice import dsp
+
+        super().update(settings)
+        self._mix.set(dsp.strength_mix(self._f("strength")))  # a 10 ms ramp, as the chain's
+
+    def process(self, x: Audio) -> Audio:
+        dry = self._dry.process(x)
+        wet = self._rnnoise.process(x)
+        return (wet + self._mix.gains(len(x)) * (dry - wet)).astype(np.float32)
+
+
+class VoiceStyle(Filter):
+    """Clean Voice's own Voice Style filter (DESIGN J13; OBS has none): the chain's style EQ, ``settings.style_bands``
+    into ``dsp.Equalizer``, whose 20 ms glide makes a change of style or Strength click-free."""
+
+    KIND = fine_tune.STYLE_KIND
+
+    def __init__(self, settings: Mapping[str, object] | None = None) -> None:
+        from clean_voice import dsp
+
+        self._eq = dsp.Equalizer(self._bands(fine_tune.resolve(self.KIND, settings)))
+        super().__init__(settings)
+
+    @staticmethod
+    def _bands(settings: Mapping[str, Any]) -> Any:
+        from clean_voice.settings import style_bands
+
+        return style_bands(str(settings["style"]), float(settings["strength"]))
+
+    def update(self, settings: Mapping[str, object]) -> None:
+        super().update(settings)
+        self._eq.set_bands(self._bands(self.settings))
+
+    def process(self, x: Audio) -> Audio:
+        return self._eq.process(x)
+
+
 CLASSES: dict[str, type[Filter]] = {
     c.KIND: c
     for c in (
+        Denoise,
+        VoiceStyle,
         ThreeBandEq,
         Compressor,
         Expander,
@@ -470,5 +526,7 @@ def make(kind: str, settings: Mapping[str, object] | None = None, block: int | N
     size, which only Noise Suppression's queue needs."""
     if kind == NoiseSuppression.KIND:
         return NoiseSuppression(settings, block=block)
+    if kind == Denoise.KIND:
+        return Denoise(settings, block=block)
     cls: Any = CLASSES[kind]
     return cls(settings)

@@ -1,4 +1,5 @@
-"""Fine-tune's filters as data: OBS Studio's ten audio filters, their properties and defaults (J10 plan §4).
+"""Fine-tune's filters as data: OBS Studio's ten audio filters, their properties and defaults (J10 plan §4), and
+Clean Voice's own Denoise and Voice Style (J13, ``OWN_KINDS``, first in the + menu).
 
 ``KINDS`` is the one table of each filter kind's display name, properties (key, label, widget, range, step, suffix,
 default) and the OBS file it follows. The DSP (``obs_filters``), the saved choices, the filter window and the parity
@@ -23,6 +24,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
+
+from clean_voice.styles import PRESETS
 
 Value = float | int | str | bool
 
@@ -83,9 +86,30 @@ def _ratio(lo: float, hi: float, step: float, default: float) -> Prop:
     return Prop("ratio", "Ratio", SLIDER, default, lo, hi, step, ":1")
 
 
+DENOISE_KIND = "clean_voice_denoise_filter"
+STYLE_KIND = "clean_voice_style_filter"
+OWN_KINDS: tuple[str, ...] = (DENOISE_KIND, STYLE_KIND)  # Clean Voice's own (J13): OBS has no such filters
+
 KINDS: dict[str, Kind] = {
     k.id: k
     for k in (
+        Kind(
+            DENOISE_KIND,
+            "Denoise",
+            (  # Step 2's Denoise strength: 0..100, default 70 (app.py strength_bar; settings.Settings.strength)
+                Prop("strength", "Strength", SLIDER, 70, 0, 100, 1, "", is_int=True),
+            ),
+            "Clean Voice's own (DESIGN J13): dsp.py strength_mix and Chain's Denoise stage",
+        ),
+        Kind(
+            STYLE_KIND,
+            "Voice Style",
+            (  # Step 2's style list and Strength 0..1, default 0.5 (settings.STYLE_STRENGTH, style_bands)
+                Prop("style", "Style", LIST, "natural", options=tuple((k, p.name) for k, p in PRESETS.items())),
+                Prop("strength", "Strength", SLIDER, 0.5, 0.0, 1.0, 0.01),
+            ),
+            "Clean Voice's own (DESIGN J13): settings.py style_bands and dsp.py Equalizer",
+        ),
         Kind(
             "basic_eq_filter",
             "3-Band Equalizer",
@@ -198,8 +222,11 @@ KINDS: dict[str, Kind] = {
     )
 }
 
-# The + menu: sorted by display name, as OBSBasicFilters::CreateAddFilterPopupMenu does (:458-516).
-MENU_ORDER: tuple[str, ...] = tuple(sorted(KINDS, key=lambda k: KINDS[k].name))
+# The + menu: Clean Voice's own two first (Denoise, Voice Style), then OBS's, sorted by display name, as
+# OBSBasicFilters::CreateAddFilterPopupMenu does (:458-516).
+MENU_ORDER: tuple[str, ...] = OWN_KINDS + tuple(
+    sorted((k for k in KINDS if k not in OWN_KINDS), key=lambda k: KINDS[k].name)
+)
 
 
 def defaults(kind: str, settings: Mapping[str, object] | None = None) -> dict[str, Value]:

@@ -154,12 +154,14 @@ def row_point(window: FilterWindow, row: int, x: int) -> QPoint:
 # ------------------------------------------------------------------ T31 the list
 
 
-def test_the_add_menu_lists_exactly_obss_ten_kinds_in_obss_order(make) -> None:
+def test_the_add_menu_lists_clean_voices_two_then_obss_ten_kinds_in_obss_order(make) -> None:
     window, _ = make()
     actions = window.add_menu.actions()
-    assert [a.text() for a in actions] == OBS_MENU
-    assert [a.data() for a in actions] == list(fine_tune.MENU_ORDER)
-    assert sorted(a.data() for a in actions) == sorted(KINDS)  # every kind, each once
+    assert actions[2].isSeparator()  # J13: Denoise, Voice Style, a separator, then OBS's
+    filters = [a for a in actions if not a.isSeparator()]
+    assert [a.text() for a in filters] == ["Denoise", "Voice Style", *OBS_MENU]
+    assert [a.data() for a in filters] == list(fine_tune.MENU_ORDER)
+    assert sorted(a.data() for a in filters) == sorted(KINDS)  # every kind, each once
 
 
 def test_t31_adding_asks_for_a_name_with_obss_rule_and_puts_it_at_the_bottom_selected(make) -> None:

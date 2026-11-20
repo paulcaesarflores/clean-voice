@@ -846,9 +846,12 @@ class FilterWindow(QWidget):
         grid.addLayout(bottom, 2, 1)
         grid.setColumnStretch(1, 1)
         grid.setRowStretch(1, 1)
-        # The + menu: OBS's ten audio filters, sorted by name (CreateAddFilterPopupMenu :458-516).
+        # The + menu: Clean Voice's own Denoise and Voice Style, a separator, then OBS's ten audio filters, sorted by
+        # name (CreateAddFilterPopupMenu :458-516).
         self.add_menu = QMenu("Add", self)
-        for kind in MENU_ORDER:
+        for position, kind in enumerate(MENU_ORDER):
+            if position == len(fine_tune.OWN_KINDS):
+                self.add_menu.addSeparator()
             action = self.add_menu.addAction(KINDS[kind].name)
             action.setData(kind)
             action.triggered.connect(lambda _=False, kind=kind: self.add_filter(kind))
