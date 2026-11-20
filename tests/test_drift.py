@@ -5,7 +5,10 @@ The normal suite simulates minutes of audio; ``-m slow`` runs the full hour (WOR
 
 import logging
 import sys
+import threading
+import time
 from itertools import pairwise
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -34,6 +37,7 @@ from clean_voice.audio_path import (
 START_MS = TARGET_FILL_S * 1000  # the start cushion (60 ms)
 START_FRAMES = int(TARGET_FILL_S * SAMPLE_RATE)
 from clean_voice.dsp import Chain, PassThrough
+from clean_voice.wav import Recorder
 
 # Echo removal exists on Windows only in v1 (app.ECHO_MODULES; pyproject installs its AEC there only): "everything on"
 # is Hear myself and echo removal on Windows, Hear myself alone on macOS.
@@ -666,3 +670,46 @@ def test_a_new_sink_does_not_add_buffering_for_old_underruns() -> None:
     monitor = path.add_monitor(SAMPLE_RATE, 2)  # Hear myself switched on
     monitor.push(block)
     assert monitor.target_ms == pytest.approx(START_MS)
+
+
+def test_a_stalled_backup_write_does_not_underrun_the_cable(tmp_path: Path) -> None:
+    # B002 item 12 (E-5): the backup is written on its own thread (plugins/obs-ffmpeg/obs-ffmpeg-output.c
+    # write_thread), so a 0.3 s disk stall never reaches the cable's worker.
+    def run(stall_s: float) -> int:
+        rec = Recorder(tmp_path / f"stall{stall_s}")
+        real, calls = rec.clean.write, [0]
+
+        def write(samples: np.ndarray) -> None:
+            calls[0] += 1
+            if calls[0] == 100 and stall_s:
+                time.sleep(stall_s)  # a blocking disk write
+            real(samples)
+
+        rec.clean.write = write  # type: ignore[method-assign]
+        path = AudioPath(48_000, 1, 48_000, 2, PassThrough(), recorder=rec)
+        stop = threading.Event()
+
+        def device() -> None:  # the cable's callback thread, every 10 ms
+            out = np.zeros((480, 2), np.float32)
+            nxt = time.perf_counter()
+            while not stop.is_set():
+                path.output_callback(out, 480, None, None)
+                nxt += 0.010
+                time.sleep(max(0.0, nxt - time.perf_counter()))
+
+        th = threading.Thread(target=device)
+        th.start()
+        block = np.full((480, 1), 0.1, np.float32)
+        nxt = time.perf_counter()
+        for _ in range(200):  # 2 s of mic, in real time
+            path.input_callback(block, 480, None, None)
+            path.process()
+            nxt += 0.010
+            time.sleep(max(0.0, nxt - time.perf_counter()))
+        stop.set()
+        th.join()
+        rec.close()
+        return path.counters.underruns
+
+    assert run(0.0) == 0  # the control
+    assert run(0.3) == 0

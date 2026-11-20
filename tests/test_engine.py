@@ -654,6 +654,38 @@ def test_a_missing_mic_is_retried_every_retry_interval(make_engine) -> None:
     assert backend.rescans_while_open == 0
 
 
+def test_the_backup_keeps_wall_time_across_a_mic_loss(make_engine) -> None:
+    # B002 item 7: a missing mic is silence in the file, as in OBS's mix (libobs/media-io/audio-io.c audio_thread and
+    # input_and_output; obs-audio.c audio_callback), so the backup is as long as the call.
+    engine, backend = make_engine([MIC, CABLE])
+    engine.start(MIC.name)
+    wait_for(lambda: engine.status().state is State.ON)
+    t0 = time.monotonic()
+    time.sleep(0.6)
+    backend.present.remove(MIC)
+    wait_for(lambda: engine.status().state is State.MIC_LOST)
+    time.sleep(1.0)
+    backend.present.append(MIC)
+    wait_for(lambda: engine.status().state is State.ON and len(backend.opened) == 2)
+    time.sleep(0.6)
+    files = engine.status().recording_files
+    engine.stop()
+    wait_for(lambda: engine.status().state is State.OFF)
+    wall = time.monotonic() - t0
+    assert len(files) == 2
+    for f in files:
+        with wave.open(str(f), "rb") as w:
+            data = np.frombuffer(w.readframes(w.getnframes()), np.uint8)
+        samples = data.reshape(-1, 3)
+        quiet = ~samples.any(axis=1)
+        assert abs(len(samples) / 48_000 - wall) < 0.3, (len(samples) / 48_000, wall)
+        # audio, then a run of zeros as long as the gap, then audio again (the clean file may start with a few zeros)
+        edges = np.flatnonzero(np.diff(np.concatenate(([0], quiet.astype(np.int8), [0]))))
+        longest = max(zip(edges[::2], edges[1::2], strict=True), key=lambda run: run[1] - run[0])
+        assert (longest[1] - longest[0]) / 48_000 > 0.8
+        assert not quiet[: longest[0]].all() and not quiet[longest[1] :].all()
+
+
 def test_counters_and_backups_survive_a_reconnect(make_engine) -> None:
     # D3: the totals carry across the reconnect, and the backup goes on in the same pair of files.
     engine, backend = make_engine([MIC, CABLE])

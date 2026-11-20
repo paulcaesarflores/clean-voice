@@ -187,6 +187,7 @@ class Engine:
         self._await_mic = False  # a retried mic: MIC_LOST until its first callback
         self._cable_retry_at = 0.0
         self._recorder: Recorder | None = None
+        self._backup_gap_from: float | None = None  # when the path closed with a live recorder; None: no gap to fill
         self._retry_at = 0.0
         self._last_in = (0, 0.0)
         self._last_out = (0, 0.0)
@@ -761,6 +762,11 @@ class Engine:
         # runs the path's worker step, so attaching the recorder after the streams started is safe.
         if self._recorder is None and self._record:
             self._recorder = self._new_recorder()
+        elif self._recorder is not None and self._backup_gap_from is not None:
+            # The time the mic was away is silence in the file: OBS's mix stays on the clock and a source that is gone
+            # adds nothing (libobs/media-io/audio-io.c audio_thread, input_and_output; libobs/obs-audio.c).
+            self._recorder.write_silence(round((time.monotonic() - self._backup_gap_from) * SAMPLE_RATE))
+        self._backup_gap_from = None
         recorder = self._recorder
         self._path.recorder = recorder
         self._had_mic = True
@@ -783,7 +789,7 @@ class Engine:
             error=self._status.error if prior is State.ERROR else None,
             recording=recorder is not None and recorder.active,
             recording_error=self._recording_error(),
-            **({"recording_files": (recorder.clean.path, recorder.raw.path)} if recorder else {}),
+            **({"recording_files": recorder.files} if recorder else {}),
         )
         # Hear myself and echo removal carry on across reconnects.
         if self._monitor_on:
@@ -811,7 +817,7 @@ class Engine:
             recording_error=self._recording_error(),
             recording_seconds=recorder.frames_total / SAMPLE_RATE if recorder else 0.0,
             # A long session rolls over to a new pair before the 4 GiB WAV limit.
-            **({"recording_files": (recorder.clean.path, recorder.raw.path)} if recorder else {}),
+            **({"recording_files": recorder.files} if recorder else {}),
         )
         self._pump_monitor(path, now)
         self._pump_echo(path, now)
@@ -918,6 +924,9 @@ class Engine:
                 path.process()  # what was already captured still reaches the backup
             except Exception:
                 log.exception("the last audio step before closing failed")
+            if self._recorder is not None:
+                # The gap starts when the mic last delivered, not when the stall was noticed (see _open).
+                self._backup_gap_from = self._last_in[1]
             fine = getattr(path.chain, "fine_tune", None)
             if fine is not None:
                 fine.close()  # this chain runs no more: its VST plug-ins may be unloaded (vst.VstRegistry)
@@ -964,7 +973,7 @@ class Engine:
             self._recorder = self._new_recorder()
             self._path.recorder = self._recorder
             if self._recorder is not None:
-                update.update(recording=True, recording_files=(self._recorder.clean.path, self._recorder.raw.path))
+                update.update(recording=True, recording_files=self._recorder.files)
         self._update(recording_error=self._recording_error(), **update)
 
     def _close_recorder(self) -> None:

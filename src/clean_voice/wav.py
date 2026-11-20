@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import queue
 import struct
+import threading
 from pathlib import Path
 from typing import BinaryIO
 
@@ -111,7 +113,9 @@ class Recorder:
     """The backup pair: the clean voice and the raw mic, side by side in one folder.
 
     A RIFF header holds 32-bit sizes, so one file stops at 4 GiB, about 8 h 17 min of 48 kHz 24-bit mono. Before a
-    pair gets there it is closed and the recording goes on in a new pair. A failure to write never leaves ``write``:
+    pair gets there it is closed and the recording goes on in a new pair. The files are written on a thread of their
+    own, so a slow disk never holds the caller (plugins/obs-ffmpeg/obs-ffmpeg-output.c: the producer queues and posts,
+    ``write_thread`` drains and writes; the queue is unbounded, as there). A failure to write never leaves ``write``:
     it ends the recording (``error``) and the voice goes on.
     """
 
@@ -120,7 +124,12 @@ class Recorder:
         self.error: str | None = None
         self.pairs = 0  # pairs opened so far, the current one included
         self.frames_total = 0  # frames written to all pairs
+        self.files: tuple[Path, Path]  # the current pair's paths, replaced whole on roll-over
         self.clean, self.raw = self._open_pair(now)
+        self._queue: queue.SimpleQueue[tuple[str, object] | None] = queue.SimpleQueue()
+        self._closed = False
+        self._thread = threading.Thread(target=self._run, name="backup-writer", daemon=True)
+        self._thread.start()
 
     def _open_pair(self, now: dt.datetime | None = None) -> tuple[WavWriter, WavWriter]:
         folder = self.folder
@@ -137,6 +146,7 @@ class Recorder:
             clean.close()
             raise
         self.pairs += 1
+        self.files = (clean.path, raw.path)
         return clean, raw
 
     @property
@@ -144,17 +154,43 @@ class Recorder:
         return self.error is None
 
     def write(self, clean: npt.NDArray[np.float32], raw: npt.NDArray[np.float32]) -> None:
-        if self.error is not None:
-            return
-        try:
-            if not self.clean.has_room(len(clean)) or not self.raw.has_room(len(raw)):
-                self._roll_over()
-            self.clean.write(clean)
-            self.raw.write(raw)
-            self.frames_total += len(clean)
-        except Exception as exc:  # noqa: BLE001 - disk full, folder gone, anything: keep the voice, stop recording
-            self.error = str(exc) or type(exc).__name__
-            self._close_quietly()
+        """Queue a block for the writer thread (da_push_back + os_sem_post, obs-ffmpeg-output.c:697-701)."""
+        if self.error is None and not self._closed:
+            self._queue.put(("audio", (clean.copy(), raw.copy())))
+
+    def write_silence(self, frames: int) -> None:
+        """Queue ``frames`` of silence for both files: the time a lost mic was away (OBS's mix is cleared every tick,
+        libobs/media-io/audio-io.c input_and_output, and only sources with audio are mixed, libobs/obs-audio.c)."""
+        if self.error is None and not self._closed and frames > 0:
+            self._queue.put(("silence", frames))
+
+    def _run(self) -> None:
+        # Drains the queue and writes (obs-ffmpeg-output.c write_thread :892-919); a write error ends this output only.
+        while (item := self._queue.get()) is not None:
+            if self.error is not None:
+                continue
+            kind, data = item
+            try:
+                if kind == "audio":
+                    clean, raw = data  # type: ignore[misc]
+                    self._write_block(clean, raw)
+                else:
+                    left = int(data)  # type: ignore[call-overload]
+                    zeros = np.zeros(SAMPLE_RATE, np.float32)  # in 1 s pieces: no giant array for a long gap
+                    while left > 0:
+                        piece = zeros[: min(left, SAMPLE_RATE)]
+                        self._write_block(piece, piece)
+                        left -= len(piece)
+            except Exception as exc:  # noqa: BLE001 - disk full, folder gone, anything: keep the voice, stop recording
+                self.error = str(exc) or type(exc).__name__
+                self._close_quietly()
+
+    def _write_block(self, clean: npt.NDArray[np.float32], raw: npt.NDArray[np.float32]) -> None:
+        if not self.clean.has_room(len(clean)) or not self.raw.has_room(len(raw)):
+            self._roll_over()
+        self.clean.write(clean)
+        self.raw.write(raw)
+        self.frames_total += len(clean)
 
     def _roll_over(self) -> None:
         for writer in (self.clean, self.raw):
@@ -169,6 +205,11 @@ class Recorder:
                 log.debug("closing a failed backup file failed too", exc_info=True)
 
     def close(self) -> None:
+        """Write what is queued, stop the thread and close both files (obs-ffmpeg-output.c:1122-1126: signal, join)."""
+        if not self._closed:
+            self._closed = True
+            self._queue.put(None)
+            self._thread.join()
         for writer in (self.clean, self.raw):
             try:
                 writer.close()

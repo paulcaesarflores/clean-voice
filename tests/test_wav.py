@@ -97,13 +97,11 @@ def test_a_pair_rolls_over_before_the_size_limit(tmp_path: Path, monkeypatch: py
     # file on Windows). Every pair is complete and readable; nothing is lost between them.
     monkeypatch.setattr(wav, "MAX_DATA_BYTES", 216_000)  # 1.5 s of 48 kHz 24-bit
     rec = Recorder(tmp_path)
-    paths = []
-    for k in range(300):  # 3 s of 10 ms blocks
+    for _ in range(300):  # 3 s of 10 ms blocks
         rec.write(np.full(480, 0.25, np.float32), np.full(480, 0.5, np.float32))
-        if (rec.clean.path, rec.raw.path) not in paths:
-            paths.append((rec.clean.path, rec.raw.path))
-        assert rec.error is None, k
-    rec.close()
+    rec.close()  # the writer thread has written everything queued once close returns
+    paths = list(zip(sorted(tmp_path.glob("* clean voice.wav")), sorted(tmp_path.glob("* raw mic.wav")), strict=True))
+    assert rec.error is None
     assert rec.pairs == len(paths) == 2 and rec.frames_total == 300 * 480
     total = 0
     for clean_path, raw_path in paths:
@@ -127,8 +125,67 @@ def test_any_write_failure_ends_the_backup_and_never_raises(tmp_path: Path) -> N
     rec.clean.flush = broken  # type: ignore[method-assign]
     for _ in range(200):
         rec.write(np.zeros(480, np.float32), np.zeros(480, np.float32))  # must not raise
+    rec.close()  # the writer thread has run once close returns
     assert not rec.active and rec.error and "format requires" in rec.error
     rec.close()  # closing a failed recorder is safe
+
+
+def test_write_silence_adds_zeros_to_both_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # B002 item 7: a mic gap is written as silence (libobs/media-io/audio-io.c input_and_output clears the mix each
+    # tick; obs-audio.c audio_callback mixes only sources that have audio). Across the roll-over limit too.
+    monkeypatch.setattr(wav, "MAX_DATA_BYTES", 216_000)  # 1.5 s per file
+    rec = Recorder(tmp_path)
+    rec.write(np.full(480, 0.25, np.float32), np.full(480, 0.5, np.float32))
+    rec.write_silence(48_000 * 2 + 5)
+    rec.write(np.full(480, 0.25, np.float32), np.full(480, 0.5, np.float32))
+    rec.close()
+    total = 480 * 2 + 48_000 * 2 + 5
+    assert rec.error is None and rec.pairs == 2 and rec.frames_total == total
+    first_first = lambda p: "(" in p.name
+    clean = np.concatenate([read_wav(p)[1] for p in sorted(tmp_path.glob("* clean voice.wav"), key=first_first)])
+    raw = np.concatenate([read_wav(p)[1] for p in sorted(tmp_path.glob("* raw mic.wav"), key=first_first)])
+    for data, level in ((clean, 0.25), (raw, 0.5)):
+        assert len(data) == total
+        assert np.allclose(data[:480], level, atol=1e-6) and np.allclose(data[-480:], level, atol=1e-6)
+        assert not data[480:-480].any()
+
+
+def test_a_slow_disk_write_does_not_block_the_caller(tmp_path: Path) -> None:
+    # B002 item 12: the data is queued and a write thread writes it (plugins/obs-ffmpeg/obs-ffmpeg-output.c
+    # write_thread, :892-919), so a slow disk never holds the caller.
+    rec = Recorder(tmp_path)
+    real = rec.clean.write
+
+    def slow(samples: np.ndarray) -> None:
+        time.sleep(0.3)
+        real(samples)
+
+    rec.clean.write = slow  # type: ignore[method-assign]
+    block = np.full(480, 0.25, np.float32)
+    start = time.perf_counter()
+    for _ in range(3):
+        rec.write(block, block)
+    assert time.perf_counter() - start < 0.05
+    rec.close()
+    assert rec.error is None
+    assert len(read_wav(next(tmp_path.glob("* clean voice.wav")))[1]) == 3 * 480
+    assert len(read_wav(next(tmp_path.glob("* raw mic.wav")))[1]) == 3 * 480
+
+
+def test_a_write_failure_in_the_writer_thread_ends_the_backup_quietly(tmp_path: Path) -> None:
+    rec = Recorder(tmp_path)
+
+    def broken(samples: np.ndarray) -> None:
+        raise OSError("disk full")
+
+    rec.clean.write = broken  # type: ignore[method-assign]
+    block = np.zeros(480, np.float32)
+    for _ in range(5):
+        rec.write(block, block)  # never raises
+    rec.close()  # returns
+    assert rec.error == "disk full" and not rec.active
+    rec.write(block, block)  # after the error: dropped at once
+    rec.write_silence(100)
 
 
 CHILD = textwrap.dedent(
