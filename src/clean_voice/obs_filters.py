@@ -26,8 +26,9 @@ from typing import Any, ClassVar
 import numpy as np
 import numpy.typing as npt
 
-from clean_voice import fine_tune
+from clean_voice import fine_tune, nvafx
 from clean_voice.filters import sosfilt
+from clean_voice.ring import Ring
 
 SAMPLE_RATE = 48_000
 SCRATCH = 480  # the worker's block: the scratch buffers' first size (OBS: DEFAULT_AUDIO_BUF_MS, 10 ms)
@@ -503,11 +504,97 @@ class VoiceStyle(Filter):
         return self._eq.process(x)
 
 
+class NvidiaAudioEffects(Filter):
+    """NVIDIA Audio Effects: noise removal, room echo removal, or both, on NVIDIA's runtime (J12), mono at 48 kHz.
+
+    Follows plugins/nv-filters/nvidia-audiofx-filter.c: the settings are method, intensity and Voice Optimized
+    (nvidia_audio_update :444-527, nvidia_audio_defaults :807-813); the audio is cut into 10 ms segments of 480 samples
+    that wait in a queue until whole (BUFFER_SIZE_MSEC :41, nvidia_audio_filter_audio :739-805, process :704-717); each
+    goes through ``nvafx.Effect`` (process_fx :625-702; Clean Voice's chain is already 48 kHz mono, so OBS's
+    resamplers and its mono-to-stereo copy are not needed). The effect loads on a thread (``nvafx.Effect``): until it
+    is ready the audio passes through unchanged, as in OBS.
+
+    Without the runtime (a saved filter on a computer that has none, or macOS) there is no effect: the audio passes
+    through, as a filter whose module is missing does in OBS (libobs/obs-source.c filter_async_audio :3917 runs only
+    a filter with ``context.data``). ``block``: as for ``NoiseSuppression``: whole 480-sample blocks add no queue
+    latency, any other size adds 10 ms.
+    """
+
+    KIND = fine_tune.NVIDIA_KIND
+
+    def __init__(self, settings: Mapping[str, object] | None = None, block: int | None = 480) -> None:
+        self._effect: nvafx.Effect | None = None
+        self._checked = False  # the runtime check has answered, and an effect was made if it found the runtime
+        self.whole_frames = block is not None and block % nvafx.FRAME_SIZE == 0
+        self.latency = 0  # 10 ms for any other block size, once an effect exists (the queue, below)
+        self._pending = np.zeros(nvafx.FRAME_SIZE, np.float32)
+        self._pending_len = 0
+        self._frame = np.zeros(nvafx.FRAME_SIZE, np.float32)
+        self._out = Ring(1 << 16)
+        super().__init__(settings)
+        self._effect_now()
+
+    def _effect_now(self) -> nvafx.Effect | None:
+        """The effect, made as soon as the runtime check (started at launch, off every audio thread) has found the
+        runtime: this never waits for it, so until then the audio passes through, as with no runtime at all."""
+        if self._effect is None and not self._checked:
+            checked, rt = nvafx.peek()
+            if checked:
+                self._checked = True
+                if rt is not None and rt.api is not None:
+                    self._effect = nvafx.Effect(rt, *self._params())
+                    if not self.whole_frames:
+                        self.latency = nvafx.FRAME_SIZE
+                        self._out.write(np.zeros(self.latency, np.float32))  # fixed, so every call returns a block
+        return self._effect
+
+    def _params(self) -> tuple[str, float, bool]:
+        return str(self.settings["method"]), self._f("intensity"), self.settings["vad"] is True
+
+    def update(self, settings: Mapping[str, object]) -> None:
+        super().update(settings)
+        if self._effect is not None:
+            self._effect.set(*self._params())
+
+    @property
+    def failed(self) -> bool:
+        """The effect could not load or run (OBS switches the filter off then, :333-345); the audio passes through."""
+        return self._effect is not None and self._effect.failed
+
+    def close(self) -> None:
+        if self._effect is not None:
+            self._effect.close()
+            self._effect = None
+        self._checked = True
+
+    def process(self, x: Audio) -> Audio:
+        effect = self._effect_now()
+        if effect is None:
+            return x.astype(np.float32, copy=True)
+        size = len(self._pending)
+        pos = 0
+        while pos < len(x):
+            take = min(size - self._pending_len, len(x) - pos)
+            self._pending[self._pending_len : self._pending_len + take] = x[pos : pos + take]
+            self._pending_len += take
+            pos += take
+            if self._pending_len == size:
+                self._frame[:] = self._pending
+                effect.run(self._frame)  # untouched while the effect loads or has failed
+                self._out.write(self._frame)
+                self._pending_len = 0
+        y = np.empty(len(x), np.float32)
+        if self._out.read_into(y) < len(x):
+            raise ValueError(f"a {len(x)}-sample block: this chain was made for whole 480-sample frames")
+        return y
+
+
 CLASSES: dict[str, type[Filter]] = {
     c.KIND: c
     for c in (
         Denoise,
         VoiceStyle,
+        NvidiaAudioEffects,
         ThreeBandEq,
         Compressor,
         Expander,
@@ -528,5 +615,7 @@ def make(kind: str, settings: Mapping[str, object] | None = None, block: int | N
         return NoiseSuppression(settings, block=block)
     if kind == Denoise.KIND:
         return Denoise(settings, block=block)
+    if kind == NvidiaAudioEffects.KIND:
+        return NvidiaAudioEffects(settings, block=block)
     cls: Any = CLASSES[kind]
     return cls(settings)

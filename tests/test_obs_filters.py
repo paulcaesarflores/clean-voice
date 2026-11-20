@@ -103,6 +103,7 @@ MENU = [
     "Gain",
     "Invert Polarity",
     "Limiter",
+    "NVIDIA Audio Effects",  # J12: nv-filters en-US.ini :1; offered only where NVIDIA's runtime is installed
     "Noise Gate",
     "Noise Suppression",
     "Upward Compressor",

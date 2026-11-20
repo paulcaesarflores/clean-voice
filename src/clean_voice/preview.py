@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, cast
 
-from clean_voice import fine_tune, vst
+from clean_voice import fine_tune, nvafx, vst
 from clean_voice.devices import is_cable
 from clean_voice.engine import EchoState, MicTestState, State, Status
 from clean_voice.prefs import Prefs
@@ -394,6 +394,12 @@ class FilterSample:
         )
         model.load_saved()
         return model
+
+
+# The runtime the filter window's renders pretend to have, so the NVIDIA filter shows the same on every machine.
+PREVIEW_RUNTIME = nvafx.Runtime(
+    "C:\\Program Files\\NVIDIA Corporation\\NVIDIA Audio Effects SDK", nvafx.pack_version(1, 7, 0, 0)
+)
 
 
 def filter_samples(platform: str = sys.platform) -> dict[str, FilterSample]:

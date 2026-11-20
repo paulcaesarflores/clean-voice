@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from clean_voice import filter_window, prefs, theme
     from clean_voice.app import APP_NAME, UI_FONTS, MainWindow
-    from clean_voice.preview import filter_samples, machine_devices, sample_states
+    from clean_voice.preview import PREVIEW_RUNTIME, filter_samples, machine_devices, sample_states
 
     class NoLoginItem:
         def is_enabled(self) -> bool:
@@ -145,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             pal = theme.for_name(theme_name)
             theme.use(pal)
-            fwindow = filter_window.FilterWindow(fsample.model(), pal, args.platform)
+            fwindow = filter_window.FilterWindow(fsample.model(), pal, args.platform, runtime=lambda: PREVIEW_RUNTIME)
             windows.append(fwindow)
             fwindow.show()
             fwindow.list.setCurrentRow(fsample.select)

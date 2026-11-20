@@ -1,4 +1,5 @@
-"""Fine-tune's filters as data: OBS Studio's ten audio filters, their properties and defaults (J10 plan §4), and
+"""Fine-tune's filters as data: OBS Studio's ten audio filters, their properties and defaults (J10 plan §4), NVIDIA
+Audio Effects (J12, ``NVIDIA_KIND``, in the table always so a saved one loads, in the + menu only with the runtime), and
 Clean Voice's own Denoise and Voice Style (J13, ``OWN_KINDS``, first in the + menu).
 
 ``KINDS`` is the one table of each filter kind's display name, properties (key, label, widget, range, step, suffix,
@@ -89,6 +90,9 @@ def _ratio(lo: float, hi: float, step: float, default: float) -> Prop:
 DENOISE_KIND = "clean_voice_denoise_filter"
 STYLE_KIND = "clean_voice_style_filter"
 OWN_KINDS: tuple[str, ...] = (DENOISE_KIND, STYLE_KIND)  # Clean Voice's own (J13): OBS has no such filters
+NVIDIA_KIND = (
+    "nvidia_audiofx_filter"  # J12: OBS's NVIDIA Audio Effects; offered only where NVIDIA's runtime is installed
+)
 
 KINDS: dict[str, Kind] = {
     k.id: k
@@ -170,6 +174,27 @@ KINDS: dict[str, Kind] = {
             "plugins/obs-filters/limiter-filter.c: :34-39, limiter_defaults :182-186, limiter_properties :188-201",
         ),
         Kind(
+            NVIDIA_KIND,
+            "NVIDIA Audio Effects",
+            (  # the Method list, the intensity slider and the Voice Optimized box, in nvidia_audio_properties' order
+                Prop(
+                    "method",
+                    "Method",
+                    LIST,
+                    "denoiser",
+                    options=(
+                        ("denoiser", "NVIDIA Noise Removal"),
+                        ("dereverb", "NVIDIA Room Echo Removal"),
+                        ("dereverb_denoiser", "NVIDIA Noise Removal + Room Echo Removal"),
+                    ),
+                ),
+                Prop("intensity", "Suppression Intensity", SLIDER, 1.0, 0.0, 1.0, 0.01),
+                Prop("vad", "Voice Optimized", CHECKBOX, True),
+            ),
+            "plugins/nv-filters/nvidia-audiofx-filter.c: :24-38, nvidia_audio_defaults :807-813, "
+            "nvidia_audio_properties :828-855; display names: plugins/nv-filters/data/locale/en-US.ini :1-9",
+        ),
+        Kind(
             "noise_gate_filter",
             "Noise Gate",
             (  # listed Close then Open; the times are number boxes (noise_gate_properties :170-179)
@@ -227,6 +252,12 @@ KINDS: dict[str, Kind] = {
 MENU_ORDER: tuple[str, ...] = OWN_KINDS + tuple(
     sorted((k for k in KINDS if k not in OWN_KINDS), key=lambda k: KINDS[k].name)
 )
+
+
+def menu_order(nvidia: bool) -> tuple[str, ...]:
+    """``MENU_ORDER`` as this computer offers it: without the NVIDIA filter unless its runtime was found
+    (nv-filters.c obs_module_load :23-28 registers it only then, and OBS's menu lists registered filters)."""
+    return MENU_ORDER if nvidia else tuple(k for k in MENU_ORDER if k != NVIDIA_KIND)
 
 
 def defaults(kind: str, settings: Mapping[str, object] | None = None) -> dict[str, Value]:

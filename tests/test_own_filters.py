@@ -54,7 +54,7 @@ def test_step_2_wording_defaults_and_ranges() -> None:
 
 def test_menu_order_puts_clean_voices_two_first() -> None:
     assert fine_tune.MENU_ORDER[:3] == (DENOISE_KIND, STYLE_KIND, "basic_eq_filter")
-    assert len(fine_tune.MENU_ORDER) == 12 and len(set(fine_tune.MENU_ORDER)) == 12
+    assert len(fine_tune.MENU_ORDER) == 13 and len(set(fine_tune.MENU_ORDER)) == 13  # J12 added NVIDIA Audio Effects
 
 
 # ------------------------------------------------------------------ Denoise equals Step 2's Denoise stage

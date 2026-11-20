@@ -65,7 +65,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from clean_voice import __version__, autostart, filter_window, fonts, mark, mic_level, prefs, theme, updates, vst
+from clean_voice import (
+    __version__,
+    autostart,
+    filter_window,
+    fonts,
+    mark,
+    mic_level,
+    nvafx,
+    prefs,
+    theme,
+    updates,
+    vst,
+)
 from clean_voice.devices import CABLE_DOWNLOAD_URL, is_cable_output
 from clean_voice.dsp import loudness_db
 from clean_voice.engine import ECHO_MAC, EchoState, MicTestState, State, Status
@@ -2332,6 +2344,7 @@ def main(argv: list[str] | None = None, engine: EngineLike | None = None, prefs_
             return 0
         server = tray.InstanceServer(name)
 
+    nvafx.probe_async()  # is NVIDIA's audio effects runtime here? OBS asks once at start-up, never in the audio path
     window = MainWindow(engine, prefs_path)
     if server is not None:
         server.show_requested.connect(window.show_from_tray)

@@ -56,6 +56,7 @@ FILTER_STATES = [
     "filters-gain",
     "filters-invert-polarity",
     "filters-limiter",
+    "filters-nvidia-audiofx",
     "filters-noise-gate",
     "filters-noise-suppress",
     "filters-upward-compressor",

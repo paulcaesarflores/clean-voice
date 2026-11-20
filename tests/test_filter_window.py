@@ -18,7 +18,7 @@ from test_main_screen import MICS, ON, OUTPUTS, FakeLoginItem
 from vst_fake import FakeLibrary, FakePlugin
 
 from clean_voice import filter_window as fw
-from clean_voice import fine_tune, prefs, vst, vst_editor
+from clean_voice import fine_tune, nvafx, prefs, vst, vst_editor
 from clean_voice.app import MainWindow
 from clean_voice.filter_window import FilterModel, FilterWindow
 from clean_voice.fine_tune import BUTTON, CHECKBOX, HIDDEN, INT, KINDS, LIST, SLIDER, FilterSpec
@@ -93,6 +93,8 @@ def make(qtbot: QtBot):
         settings: Settings | None = None,
         found: list[tuple[str, str]] | None = None,
         loader: Callable[[Mapping[str, object]], vst.VstPlugin | None] | None = None,
+        runtime: nvafx.Runtime
+        | None = None,  # NVIDIA's runtime: none, whatever this computer has (test_nvidia_audiofx)
     ) -> tuple[FilterWindow, Host]:
         host = Host(settings)
         model = FilterModel(
@@ -104,7 +106,7 @@ def make(qtbot: QtBot):
             lambda: [Path("C:/Program Files/VSTPlugins")],
         )
         model.load_saved()
-        window = FilterWindow(model)
+        window = FilterWindow(model, runtime=lambda: runtime)
         window.asked: list[str] = []  # type: ignore[attr-defined]
         window.informed: list[tuple[str, str]] = []  # type: ignore[attr-defined]
         window.confirmed: list[tuple[str, str]] = []  # type: ignore[attr-defined]
@@ -160,8 +162,8 @@ def test_the_add_menu_lists_clean_voices_two_then_obss_ten_kinds_in_obss_order(m
     assert actions[2].isSeparator()  # J13: Denoise, Voice Style, a separator, then OBS's
     filters = [a for a in actions if not a.isSeparator()]
     assert [a.text() for a in filters] == ["Denoise", "Voice Style", *OBS_MENU]
-    assert [a.data() for a in filters] == list(fine_tune.MENU_ORDER)
-    assert sorted(a.data() for a in filters) == sorted(KINDS)  # every kind, each once
+    assert [a.data() for a in filters] == list(fine_tune.menu_order(False))  # no NVIDIA runtime: no NVIDIA filter
+    assert sorted(a.data() for a in filters) == sorted(set(KINDS) - {fine_tune.NVIDIA_KIND})  # each once
 
 
 def test_t31_adding_asks_for_a_name_with_obss_rule_and_puts_it_at_the_bottom_selected(make) -> None:
@@ -294,7 +296,7 @@ def test_t31_a_double_click_renames_and_refuses_a_taken_or_empty_name(make, qtbo
 
 @pytest.mark.parametrize("kind", list(KINDS))
 def test_t32_each_kinds_pane_has_obss_controls(make, kind: str) -> None:
-    window, host = make()
+    window, host = make(runtime=nvafx.Runtime("C:/NVIDIA", nvafx.pack_version(1, 7, 0, 0)))  # the NVIDIA pane needs it
     window.add_filter(kind)
     pane = window.pane
     assert pane is not None

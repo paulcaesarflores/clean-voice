@@ -68,8 +68,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from clean_voice import fine_tune, fonts, theme, vst, vst_editor
-from clean_voice.fine_tune import BUTTON, CHECKBOX, HIDDEN, INT, KINDS, LIST, MENU_ORDER, SLIDER, FilterSpec, Prop
+from clean_voice import fine_tune, fonts, nvafx, theme, vst, vst_editor
+from clean_voice.fine_tune import BUTTON, CHECKBOX, HIDDEN, INT, KINDS, LIST, SLIDER, FilterSpec, Prop
 from clean_voice.settings import Settings, replace
 from clean_voice.theme import Palette
 from clean_voice.widgets import IconButton, keyboard_focus, paint_icon, ui_font
@@ -94,6 +94,17 @@ RESET_TITLE = "Reset filter"  # OBS: "Reset Properties"
 RESET_TEXT = "Reset this filter's settings to their defaults?"
 CHOOSE_PLUGIN = "Choose a plug-in"  # OBS: "{Please select a plug-in}" (obs-vst.cpp:262)
 NO_PLUGINS = "No VST 2 plug-ins were found in the usual folders."
+# OBS's own words (nv-filters data/locale/en-US.ini Nvafx.OutdatedSDK), shown as nvidia_audio_properties :846-851 does.
+NVIDIA_OUTDATED = (
+    "WARNING: Please upgrade both NVIDIA Video & Audio SDK. Your current version of Audio SDK is outdated. "
+    "This can break Audio FX, Video FX, or both."
+)
+# OBS shows nothing for this (its filter is not registered without the runtime, so a saved one is a missing filter
+# with no properties); the line tells a guest why the filter does nothing here.
+NVIDIA_MISSING = (
+    "NVIDIA's audio effects runtime was not found on this computer, so this filter passes your voice through "
+    "unchanged. Your settings are kept."
+)
 
 
 def remove_text(name: str) -> str:
@@ -383,7 +394,14 @@ class DoubleSpinBox(_Arrows, _WheelOnlyWhenFocused, QDoubleSpinBox):
 
 
 class Combo(_WheelOnlyWhenFocused, QComboBox):
-    """A property list (AddList), with Clean Voice's chevron."""
+    """A property list (AddList), with Clean Voice's chevron. It never asks for the width of its longest item (NVIDIA's
+    "Noise Removal + Room Echo Removal" would push the pane wider than the window): it fills the pane, and the popup
+    is as wide as its items."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.setMinimumContentsLength(12)
 
     def paintEvent(self, event: object) -> None:
         super().paintEvent(event)  # type: ignore[arg-type]
@@ -480,10 +498,14 @@ class Pane(QWidget):
     changed = Signal(str, object)  # key, value
     clicked = Signal(str)  # a button's key
 
-    def __init__(self, spec: FilterSpec, plugins: Sequence[tuple[str, str]] = ()) -> None:
+    def __init__(
+        self, spec: FilterSpec, plugins: Sequence[tuple[str, str]] = (), runtime: nvafx.Runtime | None = None
+    ) -> None:
+        """``runtime``: NVIDIA's runtime, which only the NVIDIA filter's pane looks at."""
         super().__init__()
         self.setObjectName("pane")
         self.spec = spec
+        self.runtime = runtime
         self.controls: dict[str, QWidget] = {}
         self.sliders: dict[str, QSlider] = {}
         self.labels: dict[str, QLabel] = {}
@@ -495,10 +517,15 @@ class Pane(QWidget):
         form.setVerticalSpacing(10)
         self.form = form
         kind = KINDS[spec.kind]
+        nvidia = spec.kind == fine_tune.NVIDIA_KIND
         shown = [p for p in kind.props if p.widget != HIDDEN]
+        if nvidia and runtime is None:
+            shown = []  # a missing module has no properties (nvidia_audio_properties :834 adds the list only if found)
         for prop in shown:
             self._add(prop, plugins)
-        if kind.note:
+        if nvidia and runtime is None:
+            self._text(NVIDIA_MISSING)
+        elif kind.note:
             self._text(kind.note)
         elif not shown:
             self._text(NO_PROPERTIES)  # :160-163
@@ -507,6 +534,11 @@ class Pane(QWidget):
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.status.hide()
+        if nvidia and runtime is not None:
+            self._nvidia_vad(str(spec.settings.get("method", "denoiser")))
+            if runtime.outdated:  # :846-851: OBS's warning under the controls
+                form.addRow(self.status)
+                self.set_status(NVIDIA_OUTDATED, warn=True)
         self.trademark: QLabel | None = None
         if spec.kind == vst.KIND:
             form.addRow(self.status)
@@ -607,7 +639,16 @@ class Pane(QWidget):
             self.form.addRow(button)
 
     def _emit(self, key: str, value: object) -> None:
+        if key == "method" and self.spec.kind == fine_tune.NVIDIA_KIND:
+            self._nvidia_vad(str(value))
         self.changed.emit(key, value)
+
+    def _nvidia_vad(self, method: str) -> None:
+        """nvidia_audio_method_modified :815-826: Voice Optimized is shown from SDK 1.6.1.2, but not for room echo
+        removal alone."""
+        box = self.controls.get("vad")
+        if box is not None and self.runtime is not None:
+            self.form.setRowVisible(box, self.runtime.vad_supported and method != nvafx.DEREVERB)
 
     def show_buttons(self, open_shown: bool, close_shown: bool) -> None:
         """obs_property_set_visible for the two interface buttons (vst_changed :270-294)."""
@@ -776,13 +817,22 @@ class FilterWindow(QWidget):
 
     closed = Signal()
 
-    def __init__(self, model: FilterModel, palette: Palette | None = None, platform: str = sys.platform) -> None:
+    def __init__(
+        self,
+        model: FilterModel,
+        palette: Palette | None = None,
+        platform: str = sys.platform,
+        runtime: Callable[[], nvafx.Runtime | None] = nvafx.runtime,
+    ) -> None:
+        """``runtime``: NVIDIA's audio effects runtime if this computer has it (``nvafx.runtime``); the tests and the
+        preview give their own."""
         super().__init__(None, Qt.WindowType.Window)
         self.setObjectName("filterWindow")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setWindowTitle(TITLE)
         self.model = model
         self.platform = platform
+        self.runtime = runtime()  # found once, as OBS's module does at load (nv-filters.c :23-28)
         self.pane: Pane | None = None
         self._pane_uid: int | None = None
         self._plugins: list[tuple[str, str]] = []  # the plug-ins found when the VST pane was built
@@ -846,10 +896,10 @@ class FilterWindow(QWidget):
         grid.addLayout(bottom, 2, 1)
         grid.setColumnStretch(1, 1)
         grid.setRowStretch(1, 1)
-        # The + menu: Clean Voice's own Denoise and Voice Style, a separator, then OBS's ten audio filters, sorted by
-        # name (CreateAddFilterPopupMenu :458-516).
+        # The + menu: Clean Voice's own Denoise and Voice Style, a separator, then OBS's audio filters (ten, and NVIDIA
+        # Audio Effects when its runtime is installed), sorted by name (CreateAddFilterPopupMenu :458-516).
         self.add_menu = QMenu("Add", self)
-        for position, kind in enumerate(MENU_ORDER):
+        for position, kind in enumerate(fine_tune.menu_order(self.runtime is not None)):
             if position == len(fine_tune.OWN_KINDS):
                 self.add_menu.addSeparator()
             action = self.add_menu.addAction(KINDS[kind].name)
@@ -1019,7 +1069,7 @@ class FilterWindow(QWidget):
                 plugins = self.model.scan()  # fill_out_plugins runs each time the properties are built (:302)
                 spec = self._unlisted_plugin(spec, plugins)
             self._plugins = plugins
-            pane = Pane(spec, plugins)
+            pane = Pane(spec, plugins, self.runtime)
             pane.changed.connect(self._setting_changed)
             pane.clicked.connect(self._button_clicked)
             self.pane = pane
