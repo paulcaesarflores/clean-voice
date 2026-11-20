@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from speech import RATE, looped_noise, read_wav, speech
 
-from clean_voice import fine_tune, obs_filters, prefs
+from clean_voice import dsp, fine_tune, obs_filters, prefs
 from clean_voice.dsp import Chain, Equalizer, FineTune, RumbleFilter
 from clean_voice.fine_tune import DENOISE_KIND, STYLE_KIND, FilterSpec, new_filter
 from clean_voice.prefs import Prefs
@@ -131,6 +131,54 @@ def test_changing_the_denoise_strength_is_click_free() -> None:
     # the mix ramps over 10 ms: no sample step at the change is bigger than the speech makes on its own elsewhere
     steps = np.abs(np.diff(y.astype(np.float64)))
     assert steps[at - 2 : at + 2 * BLOCK].max() <= steps[: at - 2].max() * 1.5 + 1e-3
+
+
+def test_a_style_change_reaches_the_sound_as_step_2s_eq_does() -> None:
+    x = speech_in(4.0)
+    first, second = {"style": "warm", "strength": 1.0}, {"style": "crisp", "strength": 0.6}
+    y, at = retarget_run(STYLE_KIND, first, second, x)
+    # Step 2's Equalizer, retargeted at the same block with the same bands: sample for sample the same
+    eq = Equalizer(style_bands("warm", 1.0))
+    want = [eq.process(x[i : i + BLOCK]) for i in range(0, at, BLOCK)]
+    eq.set_bands(style_bands("crisp", 0.6))
+    want += [eq.process(x[i : i + BLOCK]) for i in range(at, len(x) - BLOCK + 1, BLOCK)]
+    assert np.array_equal(y, np.concatenate(want))
+    # and the change is audible: not what the unchanged filter would have played
+    kept = blocks(obs_filters.make(STYLE_KIND, first), x)[: len(y)]
+    assert np.array_equal(y[:at], kept[:at])
+    assert not np.allclose(y[at:], kept[at:], atol=1e-3)
+
+
+def test_a_denoise_change_reaches_the_sound_as_the_chains_ramped_stage_does() -> None:
+    x = speech_in(4.0)
+    at = len(x) // 2 // BLOCK * BLOCK  # where retarget_run changes a setting
+    m0, m1 = dsp.strength_mix(0.0), dsp.strength_mix(100.0)
+    assert m0 != m1
+    chain = Chain(SettingsCell(Settings(strength=0.0)), block=BLOCK)
+    stage = []
+    for i in range(0, len(x) - BLOCK + 1, BLOCK):
+        if i == at:
+            chain.cell.value = replace(chain.cell.value, strength=100.0)
+        chain.process(x[i : i + BLOCK])
+        # the chain's wet and dry paths, mixed by a plain linear 10 ms ramp from the old mix to the new
+        k = np.arange(1, BLOCK + 1) + (i - at)
+        d = m0 + (m1 - m0) * np.clip(k, 0, dsp.RAMP_SAMPLES) / dsp.RAMP_SAMPLES if i >= at else m0
+        stage.append(chain.denoise.wet + d * (chain.dry - chain.denoise.wet))
+    want = np.concatenate(stage)
+    # the stage's input is the chain's rumble-filtered mic
+    rumble = RumbleFilter()
+    rumbled = np.concatenate([rumble.process(x[i : i + BLOCK]) for i in range(0, len(x), BLOCK)])
+    f = obs_filters.make(DENOISE_KIND, {"strength": 0})
+    parts = []
+    for i in range(0, len(x) - BLOCK + 1, BLOCK):
+        if i == at:
+            f.update({"strength": 100})
+        parts.append(f.process(rumbled[i : i + BLOCK]))
+    got = np.concatenate(parts)
+    assert np.allclose(got, want, rtol=0, atol=1e-6)
+    kept = blocks(obs_filters.make(DENOISE_KIND, {"strength": 0}), rumbled)[: len(got)]
+    assert np.array_equal(got[:at], kept[:at])
+    assert not np.allclose(got[at:], kept[at:], atol=1e-3)  # the change is audible
 
 
 # ------------------------------------------------------------------ in Fine-tune: save, restore, order

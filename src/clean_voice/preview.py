@@ -397,7 +397,7 @@ class FilterSample:
 
 
 def filter_samples(platform: str = sys.platform) -> dict[str, FilterSample]:
-    """Every state of the filter window (§7 "filter window"): empty; each of the ten kinds selected; the VST filter
+    """Every state of the filter window (§7 "filter window"): empty; each of the twelve kinds selected; the VST filter
     with its plug-in loaded, failing to load and with none found; the + menu open; the remove question; a rename."""
     from clean_voice.vst import WRONG_ARCHITECTURE
 
