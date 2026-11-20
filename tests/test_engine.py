@@ -15,7 +15,7 @@ from clean_voice import devices
 from clean_voice.audio_path import AudioPath
 from clean_voice.devices import Device, PathFactory, find_cable, is_cable, microphones
 from clean_voice.dsp import PassThrough
-from clean_voice.engine import State
+from clean_voice.engine import Engine, State
 
 MIC = Device(1, "Microphone (USB Mic)", 1, 48_000.0)
 LAPTOP = Device(2, "Microphone Array (Realtek)", 2, 48_000.0)
@@ -257,6 +257,7 @@ def test_the_cable_opens_with_a_50_ms_host_buffer() -> None:
     stub = StubSoundDevice()
     backend._sd = stub  # type: ignore[attr-defined]
     backend._hostapi = 0  # type: ignore[attr-defined]
+    backend._fresh = []  # type: ignore[attr-defined]
     backend.open_output(CABLE, lambda rate, ch: lambda *a: None, latency=devices.CABLE_LATENCY_S)
     backend.open_output(SPEAKERS, lambda rate, ch: lambda *a: None)
     assert [kw["latency"] for _, kw in stub.opened] == [0.050, devices.OUTPUT_LATENCY]
@@ -311,7 +312,104 @@ def test_the_default_speakers_are_found_without_listing_devices(monkeypatch) -> 
     assert len(asked) == 10  # the default endpoint was asked for every time, so a default change is seen at once
     assert all(d is not None and d.name == SPEAKERS.name and d.index == SPEAKERS.index for d in found)
     monkeypatch.setattr(devices, "default_render_name", lambda: "Speakers (Plugged In Since The Scan)")
-    assert backend.default_speakers() is None  # unknown to the scan: not found, rather than listing again
+    backend._fresh = []  # type: ignore[attr-defined]
+    backend._pyaudio = FakePyAudioModule([])  # type: ignore[attr-defined]
+    assert backend.default_speakers() is None  # unknown to the scan and to a fresh listing: not found
+    backend._pyaudio = FakePyAudioModule(["Speakers (Plugged In Since The Scan)"])  # type: ignore[attr-defined]
+    found_now = backend.default_speakers()  # the fresh listing has it: found, still without listing through sounddevice
+    assert found_now is not None and found_now.name == "Speakers (Plugged In Since The Scan)"
+    assert listings == [], listings
+
+
+class FakePyAudioModule:
+    """PyAudioWPatch's module: each PyAudio() is a new instance with its own device list (a new one sees new devices)."""
+
+    paWASAPI = 13
+    paFloat32 = 1
+    paContinue = 0
+
+    def __init__(self, names: list[str]) -> None:
+        self.names = names
+        self.instances: list[FakePyAudio] = []
+
+    def PyAudio(self) -> "FakePyAudio":
+        pa = FakePyAudio(self)
+        self.instances.append(pa)
+        return pa
+
+
+class FakePyAudio:
+    def __init__(self, module: FakePyAudioModule) -> None:
+        self.module = module
+        self.opened: list[dict] = []
+        self.terminated = False
+
+    def get_host_api_info_by_type(self, kind: int) -> dict:
+        return {"index": 3}
+
+    def get_device_count(self) -> int:
+        return len(self.module.names)
+
+    def get_device_info_by_index(self, i: int) -> dict:
+        return {
+            "index": 40 + i,
+            "name": self.module.names[i],
+            "hostApi": 3,
+            "maxOutputChannels": 2,
+            "maxInputChannels": 0,
+            "defaultSampleRate": 44100.0,
+        }
+
+    def get_loopback_device_info_generator(self):
+        for i, name in enumerate(self.module.names):
+            yield {**self.get_device_info_by_index(i), "name": name + " [Loopback]", "maxInputChannels": 2}
+
+    def open(self, **kwargs: object) -> object:
+        self.opened.append(kwargs)
+
+        class Stream:
+            def start_stream(self) -> None: ...
+            def stop_stream(self) -> None: ...
+            def close(self) -> None: ...
+            def is_active(self) -> bool:
+                return True
+
+        return Stream()
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+
+def test_a_speaker_plugged_in_after_the_scan_is_found(monkeypatch) -> None:
+    # B003 item 9: OBS opens whatever Windows' default output is on every (re)connect (win-wasapi.cpp InitDevice,
+    # :607-618), also one that appeared after the scan. A fresh PyAudioWPatch instance lists it; the streams stay.
+    backend = object.__new__(devices.SoundDeviceBackend)
+    stub = ListingStub()
+    terminated: list[str] = []
+    stub._terminate = lambda: terminated.append("terminate")  # type: ignore[attr-defined]
+    stub._initialize = lambda: terminated.append("initialize")  # type: ignore[attr-defined]
+    backend._sd = stub  # type: ignore[attr-defined]
+    backend._hostapi = 0  # type: ignore[attr-defined]
+    backend._pa = object()  # type: ignore[attr-defined]
+    backend._loopbacks = {}  # type: ignore[attr-defined]
+    backend._fresh = []  # type: ignore[attr-defined]
+    module = FakePyAudioModule(["Headset (New Bluetooth)"])
+    backend._pyaudio = module  # type: ignore[attr-defined]
+    monkeypatch.setattr(devices.sys, "platform", "win32")
+    monkeypatch.setattr(devices, "default_render_name", lambda: "Headset (New Bluetooth)")
+    dev = backend.default_speakers()
+    assert dev is not None and dev.name == "Headset (New Bluetooth)" and dev.index == 40
+    assert backend.default_speakers() == dev and len(module.instances) == 1  # the retry makes no new instance
+    assert Engine._echo_speakers(backend) == dev
+    backend.open_output(dev, lambda rate, ch: lambda *a: None)
+    backend.open_loopback(dev, lambda rate, ch: lambda *a: None)
+    assert [o.get("output") for o in module.instances[0].opened] == [True, None]
+    assert [o.get("output_device_index") or o.get("input_device_index") for o in module.instances[0].opened] == [40, 40]
+    assert terminated == [] and stub.opened == []  # sounddevice's PortAudio was never touched
+    monkeypatch.setattr(backend, "_pick_hostapi", lambda: 0, raising=False)
+    monkeypatch.setattr(backend, "_list_loopbacks", lambda: None, raising=False)
+    backend.rescan()
+    assert module.instances[0].terminated and backend._fresh == []
 
 
 class FourChannelStub(StubSoundDevice):
@@ -1068,3 +1166,25 @@ def test_the_backup_error_names_any_call_app(tmp_path) -> None:
         assert "the call" in text and "Meet" not in text
     finally:
         engine.close()
+
+
+def test_a_denied_mic_permission_shows_mic_denied_and_recovers(make_engine, monkeypatch) -> None:
+    # B003 item 23: macOS "Don't Allow" must show a message, not ON with a silent mic. OBS checks the status before
+    # capturing (frontend/utility/platform-osx.mm CheckPermissionWithPrompt :208-231).
+    mic_denied = getattr(State, "MIC_DENIED", None)
+    assert mic_denied is not None, "State.MIC_DENIED does not exist yet"
+    answer: list[str | None] = ["denied"]
+    monkeypatch.setattr(engine_module, "mic_permission", lambda: answer[0], raising=False)
+    assert hasattr(engine_module, "mic_permission"), "engine does not check the mic permission yet"
+    engine, backend = make_engine([MIC, CABLE])
+    engine.start(MIC.name)
+    wait_for(lambda: engine.status().state is mic_denied)
+    assert backend.opened == []
+    answer[0] = "ok"
+    wait_for(lambda: engine.status().state is State.ON)
+    assert len(backend.opened) == 1
+    engine.stop()
+    wait_for(lambda: engine.status().state is State.OFF)
+    answer[0] = None  # unknown never blocks
+    engine.start(MIC.name)
+    wait_for(lambda: engine.status().state is State.ON)

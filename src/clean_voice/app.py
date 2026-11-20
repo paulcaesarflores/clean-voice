@@ -289,6 +289,14 @@ def describe(status: Status, cleaning: bool = True, platform: str = sys.platform
     if state is State.NO_MIC:
         notice = Notice("mic", NO_MIC_TITLE, "Clean Voice notices it within a few seconds.")
         return View(HEAD_NO_MIC, "hot", "hot", notice)
+    if state is State.MIC_DENIED:
+        notice = Notice(
+            "mic",
+            "Clean Voice isn't allowed to use your microphone",
+            "Open System Settings, Privacy & Security, Microphone, and switch Clean Voice on. "
+            "Clean Voice notices within a few seconds.",
+        )
+        return View(HEAD_NO_MIC, "hot", "hot", notice)
     if state is State.MIC_LOST:
         notice = Notice(
             "mic",
@@ -1992,7 +2000,9 @@ class MainWindow(QMainWindow):
         if self.power_button.isChecked() != cleaning:
             self.power_button.setChecked(cleaning)
         self.out_meter.set_muted(not reaching)  # grey: the call can't hear this (J07 r2 n4)
-        self.in_meter.set_muted(status.state in (State.NO_MIC, State.MIC_LOST, State.ERROR))  # and no mic to show
+        self.in_meter.set_muted(
+            status.state in (State.NO_MIC, State.MIC_LOST, State.MIC_DENIED, State.ERROR)
+        )  # and no mic to show
         self.in_meter.active = self.out_meter.active = on
         self.in_meter.set_level(status.input_level if on else 0.0, dt)
         self.out_meter.set_level(status.level if on else 0.0, dt)

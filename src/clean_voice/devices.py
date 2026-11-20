@@ -231,6 +231,52 @@ class _LoopbackStream:
                 log.debug("loopback stream close failed", exc_info=True)
 
 
+class _PyAudioOutput:
+    """A PyAudioWPatch output stream behind the ``Streams`` protocol, for a speaker the sounddevice scan never saw. Its
+    callback gives the sink a numpy buffer to fill and hands PyAudio the bytes."""
+
+    def __init__(self, pa: Any, pyaudio: Any, index: int, rate: int, channels: int, callback: Callback) -> None:
+        self._time = _Time()
+        self._channels = channels
+        self._callback = callback
+        self._continue = pyaudio.paContinue
+        self._out = np.zeros((0, channels), np.float32)
+        self._stream = pa.open(
+            format=pyaudio.paFloat32,
+            channels=channels,
+            rate=rate,
+            output=True,
+            output_device_index=index,
+            frames_per_buffer=0,
+            stream_callback=self._on_audio,
+            start=False,
+        )
+        self._stream.start_stream()
+
+    def _on_audio(self, in_data: bytes | None, frames: int, time_info: dict[str, float], status: int) -> Any:
+        self._time.currentTime = time_info.get("output_buffer_dac_time", 0.0)
+        if len(self._out) < frames:
+            self._out = np.zeros((frames, self._channels), np.float32)
+        out = self._out[:frames]
+        out[:] = 0.0
+        self._callback(out, frames, self._time, status)
+        return out.tobytes(), self._continue
+
+    @property
+    def active(self) -> bool:
+        try:
+            return bool(self._stream.is_active())
+        except Exception:  # noqa: BLE001 - a vanished device
+            return False
+
+    def close(self) -> None:
+        for step in (self._stream.stop_stream, self._stream.close):
+            try:
+                step()
+            except Exception:
+                log.debug("output stream close failed", exc_info=True)
+
+
 class SoundDeviceBackend:
     """PortAudio through sounddevice, on WASAPI (Windows) or Core Audio (macOS). The speakers' loopback, for echo
     removal, goes through PyAudioWPatch (Windows only): sounddevice's PortAudio has no WASAPI loopback (J06 Step 3)."""
@@ -243,6 +289,8 @@ class SoundDeviceBackend:
         self._pa: Any = None
         self._pyaudio: Any = None
         self._loopbacks: dict[str, dict[str, Any]] = {}
+        # Fresh PyAudio instances for outputs that appeared after the scan: (instance, output info, loopback info).
+        self._fresh: list[tuple[Any, dict[str, Any], dict[str, Any]]] = []
         self._list_loopbacks()
 
     def _list_loopbacks(self) -> None:
@@ -275,10 +323,48 @@ class SoundDeviceBackend:
         """Make PortAudio list devices again. Only call while no stream is open."""
         sd = self._sd
         # sounddevice's documented way to make PortAudio enumerate devices again.
+        self._terminate_fresh()
         sd._terminate()  # type: ignore[attr-defined]
         sd._initialize()  # type: ignore[attr-defined]
         self._hostapi = self._pick_hostapi()
         self._list_loopbacks()
+
+    def _terminate_fresh(self) -> None:
+        fresh, self._fresh = self._fresh, []
+        for pa, _, _ in fresh:
+            try:
+                pa.terminate()
+            except Exception:
+                log.debug("fresh PyAudio terminate failed", exc_info=True)
+
+    def _fresh_for(self, name: str) -> tuple[Any, dict[str, Any], dict[str, Any]] | None:
+        return next((f for f in self._fresh if f[1]["name"] == name), None)
+
+    def _fresh_speakers(self, name: str) -> Device | None:
+        """The output ``name`` through a new PyAudioWPatch instance: its own PortAudio lists the devices Windows has now,
+        and the mic and cable streams are not touched. One instance per name, kept until ``rescan``."""
+        if (known := self._fresh_for(name)) is not None:
+            info = known[1]
+        else:
+            if self._pyaudio is None:
+                return None
+            try:
+                pa = self._pyaudio.PyAudio()
+                wasapi = pa.get_host_api_info_by_type(self._pyaudio.paWASAPI)["index"]
+                infos = (pa.get_device_info_by_index(i) for i in range(pa.get_device_count()))
+                info = next(
+                    (d for d in infos if d["name"] == name and d["hostApi"] == wasapi and d["maxOutputChannels"] > 0),
+                    None,
+                )
+                loop = {d["name"].removesuffix(" [Loopback]"): d for d in pa.get_loopback_device_info_generator()}
+            except Exception:
+                log.warning("fresh device listing failed", exc_info=True)
+                return None
+            if info is None:
+                pa.terminate()
+                return None
+            self._fresh.append((pa, info, loop.get(name, {})))
+        return Device(int(info["index"]), name, int(info["maxOutputChannels"]), float(info["defaultSampleRate"]))
 
     def _devices(self, kind: str) -> list[Device]:
         found = []
@@ -316,6 +402,11 @@ class SoundDeviceBackend:
     ) -> Streams:
         """A plain output stream, started: the speaker sink or the silent render at OUTPUT_LATENCY, or the cable
         reopened on its own with ``latency=CABLE_LATENCY_S``."""
+        if (fresh := self._fresh_for(device.name)) is not None:
+            rate = int(device.default_rate)
+            return _PyAudioOutput(
+                fresh[0], self._pyaudio, device.index, rate, device.channels, make_callback(rate, device.channels)
+            )
         sd = self._sd
         rate = self._rate(device, False)
         stream = sd.OutputStream(
@@ -340,22 +431,25 @@ class SoundDeviceBackend:
         win-wasapi.cpp:607-618), so it follows a default change. This asks WASAPI the same (clean_voice.endpoints) and
         finds that name in the last scan: listing again would re-initialise PortAudio while audio streams, which
         disturbs drivers (docs/simple-clean-mic-audio-report.md, cause 5). A default that appeared after the scan is
-        not found until the next one (Off and On again). Elsewhere: the scanned default."""
+        listed afresh through PyAudioWPatch, once per name, with the streams untouched. Elsewhere: the scanned default."""
         if sys.platform != "win32":
             return self.default_output()
         name = default_render_name()
-        return next((d for d in self.outputs() if d.name == name), None) if name else None
+        if not name:
+            return None
+        # Open whatever the default is now, scanned or not (OBS InitDevice, win-wasapi.cpp:607-618).
+        return next((d for d in self.outputs() if d.name == name), None) or self._fresh_speakers(name)
 
     def open_loopback(self, device: Device, make_callback: CallbackFactory) -> Streams:
         """WASAPI loopback of ``device`` at its mix format (OBS captures output devices the same way,
         plugins/win-wasapi/win-wasapi.cpp:739-742, AUDCLNT_STREAMFLAGS_LOOPBACK)."""
-        info = self._loopbacks.get(device.name)
-        if self._pa is None or info is None:
+        pa, info = self._pa, self._loopbacks.get(device.name)
+        if (fresh := self._fresh_for(device.name)) is not None:
+            pa, info = fresh[0], fresh[2]
+        if pa is None or not info:
             raise OSError(f"no loopback capture for {device.name}")
         rate, channels = int(info["defaultSampleRate"]), int(info["maxInputChannels"])
-        return _LoopbackStream(
-            self._pa, self._pyaudio, int(info["index"]), rate, channels, make_callback(rate, channels)
-        )
+        return _LoopbackStream(pa, self._pyaudio, int(info["index"]), rate, channels, make_callback(rate, channels))
 
     def _extra(self) -> Any:
         # No Windows auto-convert: like OBS, each device opens in its own (mix) format (plugins/win-wasapi/

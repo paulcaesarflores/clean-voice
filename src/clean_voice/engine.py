@@ -38,6 +38,7 @@ from clean_voice.devices import (
     monitor_device,
 )
 from clean_voice.dsp import Chain
+from clean_voice.permissions import mic_permission
 from clean_voice.settings import Settings, SettingsCell
 from clean_voice.vst import VstRegistry
 from clean_voice.wav import Recorder
@@ -90,6 +91,7 @@ class State(enum.Enum):
     ON = "on"
     NO_CABLE = "no_cable"
     NO_MIC = "no_mic"
+    MIC_DENIED = "mic_denied"
     MIC_LOST = "mic_lost"
     CABLE_LOST = "cable_lost"
     ERROR = "error"
@@ -749,6 +751,10 @@ class Engine:
         mic = self._find_mic()
         if mic is None:
             self._update(state=State.MIC_LOST if self._had_mic else State.NO_MIC, output=cable.name)
+            return
+        # Check the OS's microphone permission before opening, as OBS's CheckPermission (frontend/utility/platform-osx.mm:208-231).
+        if mic_permission() == "denied":
+            self._update(state=State.MIC_DENIED, output=cable.name)
             return
 
         def make_path(in_rate: int, in_channels: int, out_rate: int, out_channels: int) -> AudioPath:
