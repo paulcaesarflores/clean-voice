@@ -1,6 +1,6 @@
 """ctypes binding to the bundled RNNoise library (BSD-3-Clause, Xiph.Org; see native/RNNOISE-COPYING.txt).
 
-The libraries in ``native/`` are built by ``tools/rnnoise/build_rnnoise.py`` from the RNNoise 0.2 release.
+The libraries in ``native/`` are built by ``tools/rnnoise/build_rnnoise.py`` from the RNNoise that OBS Studio bundles (plugins/obs-filters/rnnoise).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 
-FRAME_SIZE = 480  # 10 ms at 48 kHz, RNNoise's fixed frame
+FRAME_SIZE = 480  # 10 ms at 48 kHz, RNNoise's fixed frame (noise-suppress-filter.c:52 RNNOISE_FRAME_SIZE)
 NATIVE_DIR = Path(__file__).resolve().parent / "native"
 # RNNoise works on 16-bit-scaled floats.
 _SCALE = 32768.0
@@ -34,16 +34,12 @@ def load() -> ctypes.CDLL:
     global _lib
     if _lib is None:
         lib = ctypes.CDLL(str(library_path()))
-        lib.rnnoise_get_frame_size.restype = ctypes.c_int
-        lib.rnnoise_get_frame_size.argtypes = []
         lib.rnnoise_create.restype = ctypes.c_void_p
         lib.rnnoise_create.argtypes = [ctypes.c_void_p]
         lib.rnnoise_destroy.restype = None
         lib.rnnoise_destroy.argtypes = [ctypes.c_void_p]
         lib.rnnoise_process_frame.restype = ctypes.c_float
         lib.rnnoise_process_frame.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
-        if lib.rnnoise_get_frame_size() != FRAME_SIZE:
-            raise OSError("unexpected RNNoise frame size")
         _lib = lib
     return _lib
 

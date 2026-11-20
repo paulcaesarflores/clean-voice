@@ -6,6 +6,7 @@ from itertools import pairwise
 import numpy as np
 import pytest
 from speech import mix
+from speech import noise as speech_noise
 
 from clean_voice import dsp
 from clean_voice.dsp import (
@@ -108,7 +109,8 @@ def test_clipping_input_never_exceeds_minus_1_dbfs(size: int) -> None:
 
 
 def test_background_noise_is_clearly_reduced() -> None:
-    noise = (np.random.default_rng(1).standard_normal(3 * SAMPLE_RATE) * 0.03).astype(np.float32)
+    # Real fan noise: OBS's RNNoise (B005) is trained on such noise and leaves synthetic white noise almost untouched.
+    noise = np.asarray(speech_noise("fan.wav")[: 3 * SAMPLE_RATE], np.float32)
     out = run(Chain(), noise)
     second_half = slice(len(out) // 2, None)
     assert rms_db(out[second_half]) < rms_db(noise[second_half]) - 30
@@ -435,7 +437,7 @@ def test_dry_path_is_aligned_with_rnnoise_output() -> None:
     wet_only = run(ns, x).astype(np.float64)
     xin = x.astype(np.float64)
     corr_in = [np.dot(wet_only[k:], xin[: len(xin) - k]) for k in range(2000)]
-    assert int(np.argmax(corr_in)) == Chain.LATENCY == 1440  # 480 queued + 960 inside RNNoise 0.2
+    assert int(np.argmax(corr_in)) == Chain.LATENCY == 960  # 480 queued + 480 inside OBS's RNNoise
 
 
 def test_whole_frame_blocks_add_no_queue_latency() -> None:
@@ -443,7 +445,7 @@ def test_whole_frame_blocks_add_no_queue_latency() -> None:
     # worker always runs 480-sample blocks, so the 480 zeros pre-loaded for odd block sizes were 10 ms OBS does not add.
     x, _, _ = mix(-26.0, None, seed=2)
     chain = Chain(SettingsCell(Settings(strength=100)), block=480)
-    assert chain.latency == 2 * 480  # RNNoise 0.2's own 960 samples, nothing queued on top
+    assert chain.latency == 480  # OBS's RNNoise's own 480 samples, nothing queued on top
     out = np.concatenate([chain.process(x[i : i + 480]) for i in range(0, len(x), 480)])
     corr = [np.dot(out[k : k + 10 * SAMPLE_RATE].astype(np.float64), x[: 10 * SAMPLE_RATE]) for k in range(0, 2000, 48)]
     assert int(np.argmax(corr)) * 48 == pytest.approx(chain.latency, abs=48)

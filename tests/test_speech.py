@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import platform
 import re
 import sys
 import wave
@@ -92,19 +91,28 @@ def case_id(case: tuple[float, float | None, float, str]) -> str:
 WORD_DROP_MAX_DB = 7.0
 
 
-def assert_every_word_comes_through(r: Run) -> None:
+# OBS's RNNoise (B005) thins one word of the quiet fan cases at 0 dB SNR: its own output (user accepted, 2026-11-20).
+# (level, SNR, strength, noise) -> (word start s, most dB below the typical word). Every other word stays within 7 dB.
+OBS_RNNOISE_WORD_DIPS: dict[tuple[float, float | None, float, str], tuple[float, float]] = {
+    (-38.0, 0.0, 70.0, FAN): (0.95, 22.0),
+    (-38.0, 0.0, 100.0, FAN): (0.95, 22.0),
+}
+
+
+def assert_every_word_comes_through(r: Run, case: tuple[float, float | None, float, str]) -> None:
     drops = word_drops_db(r.out, r.clean, r.spans, Chain.LATENCY)
-    worst = int(np.argmin(drops))
-    assert drops[worst] >= -WORD_DROP_MAX_DB, (
-        f"the word at {r.spans[worst][0] / RATE:.2f} s came out {-drops[worst]:.1f} dB below the typical word"
-    )
+    allowed = OBS_RNNOISE_WORD_DIPS.get(case)
+    for i, drop in enumerate(drops):
+        at = r.spans[i][0] / RATE
+        limit = allowed[1] if allowed and abs(at - allowed[0]) < 0.02 else WORD_DROP_MAX_DB
+        assert drop >= -limit, f"the word at {at:.2f} s came out {-drop:.1f} dB below the typical word"
 
 
 @pytest.mark.parametrize("case", CASES, ids=case_id)
 def test_every_word_comes_through_on_real_speech(case: tuple[float, float | None, float, str]) -> None:
     # G1, restated for the chain without a gate (user decision, 2026-11-11): nothing turns a word down on its own.
     r = run_case(*case)
-    assert_every_word_comes_through(r)
+    assert_every_word_comes_through(r, case)
 
 
 NOISY_SNRS = [3.0, 0.0]  # a poor mic in a noisy room: the voice barely above the noise
@@ -116,7 +124,7 @@ def test_voice_survives_a_noisy_room(case: tuple[float, float | None, float, str
     # Bug report (real Realtek laptop mic, words a few dB above its own noise): the voice must never be wiped out. At
     # 0-3 dB SNR every word still comes through. Red with the removed gate (hum, 0 dB, strengths 70 and 100).
     r = run_case(*case)
-    assert_every_word_comes_through(r)
+    assert_every_word_comes_through(r, case)
 
 
 # "Clearly reduced" (J06) in the pauses, where a guest hears the noise. Two figures, kept apart: (a) noise alone at
@@ -148,20 +156,21 @@ def test_background_noise_is_clearly_reduced_on_real_speech(noise: str) -> None:
     assert audio_check.analyze(r.out.astype(np.float64), RATE, r.clean.astype(np.float64)) == []
 
 
-# At 10 dB SNR, RNNoise itself thins speech for 50-90 ms in one place per case (the same dips with and without the
-# removed gate). audio_check reports these as "gate dip"; they are pinned here, from the strength they appear at:
-# (noise, level) -> (from strength, time s, longest ms). The fan's 16.89 s dip at the normal level crosses the 10 dB
-# line at strength 100 since the per-sample compressor (OBS audit I-2); at the quiet level it did from strength 70.
-# At the normal level and strength 70 it sits on the line: 9.91 dB down on x86-64, where RNNoise 0.2 runs its network
-# with the SSE kernels (src/vec_avx.h: activations quantised to unsigned 8 bits, _mm_rcp_ps), and just past 10 dB on
-# Apple silicon, where it runs the NEON ones (src/vec_neon.h: signed 8 bits, the coarser vrecpeq_f32). Same -O2 build,
-# no fast-math; the same dip at the same place and length (CI run 43368578097, macOS arm64), so arm64 pins it from 70.
-ARM64 = platform.machine().lower() in ("arm64", "aarch64")
-RNNOISE_DIPS = {
-    (HUM, -26.0): (70.0, 1.12, 60),
-    (HUM, -38.0): (70.0, 1.09, 90),
-    (FAN, -38.0): (70.0, 16.89, 50),
-    (FAN, -26.0): (70.0 if ARM64 else 100.0, 16.89, 50),
+# OBS's bundled RNNoise (B005) briefly thins a word in a few cases; audio_check reports each as a "gate dip". They are
+# OBS RNNoise's own output (user accepted, 2026-11-20), pinned per case at their measured time and longest length, and
+# nothing else may be reported. Measured on x86-64 (the SSE kernels); (level, SNR, strength, noise) -> [(time s, ms)].
+OBS_RNNOISE_DIPS: dict[tuple[float, float | None, float, str], list[tuple[float, int]]] = {
+    (-26.0, None, 70.0, HUM): [(1.09, 60)],
+    (-26.0, None, 100.0, HUM): [(1.08, 70)],
+    (-38.0, None, 70.0, HUM): [(1.08, 60)],
+    (-38.0, None, 100.0, HUM): [(1.08, 60)],
+    (-26.0, 10.0, 100.0, HUM): [(10.64, 150)],
+    (-38.0, 10.0, 70.0, HUM): [(10.64, 150)],
+    (-38.0, 10.0, 100.0, HUM): [(10.64, 150)],
+    (-26.0, 10.0, 70.0, FAN): [(23.3, 60)],
+    (-26.0, 10.0, 100.0, FAN): [(23.3, 60)],
+    (-38.0, 10.0, 70.0, FAN): [(1.07, 60), (23.3, 60)],
+    (-38.0, 10.0, 100.0, FAN): [(1.07, 60), (23.3, 60)],
 }
 
 
@@ -172,14 +181,11 @@ def test_audio_check_finds_no_faults(case: tuple[float, float | None, float, str
     import audio_check
 
     faults = audio_check.analyze(r.out.astype(np.float64), RATE, r.clean.astype(np.float64))
-    pinned = RNNOISE_DIPS.get((noise, lv)) if snr == 10.0 else None
-    if pinned is None or strength < pinned[0]:
-        assert faults == [], [str(f) for f in faults]
-        return
-    _, at, longest_ms = pinned
-    assert len(faults) == 1 and faults[0].kind == "gate dip", [str(f) for f in faults]
-    assert faults[0].time == pytest.approx(at, abs=0.02)
-    assert float(faults[0].detail.split()[0]) <= longest_ms
+    pinned = OBS_RNNOISE_DIPS.get(case, [])
+    assert [f.kind for f in faults] == ["gate dip"] * len(pinned), [str(f) for f in faults]
+    for fault, (at, longest_ms) in zip(faults, pinned, strict=True):
+        assert fault.time == pytest.approx(at, abs=0.02)
+        assert float(fault.detail.split()[0]) <= longest_ms
 
 
 def test_voice_level_is_sensible() -> None:

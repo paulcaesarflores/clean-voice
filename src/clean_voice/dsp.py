@@ -491,16 +491,16 @@ class Chain:
     """
 
     STAGES = ("rumble", "denoise", "eq", "fine_tune", "compressor", "volume", "limiter")  # in order, for the bench
-    # RNNoise 0.2's own 960 samples (measured by cross-correlation, test S1: the plan expected 480 inside RNNoise, but the
-    # wet output lags its input by 960 more than our queue), plus the queue's 480 when the block size is not whole frames.
-    RNNOISE_LATENCY = 2 * FRAME_SIZE
-    LATENCY = NoiseSuppressor.LATENCY + RNNOISE_LATENCY  # for any block size (``block=None``): 1440 samples, 30 ms
+    # OBS's RNNoise's own 480 samples (measured by impulse, B005; noise-suppress-filter.c:451-452 hands output on as soon
+    # as a whole frame exists), plus the queue's 480 when the block size is not whole frames.
+    RNNOISE_LATENCY = FRAME_SIZE
+    LATENCY = NoiseSuppressor.LATENCY + RNNOISE_LATENCY  # for any block size (``block=None``): 960 samples, 20 ms
 
     def __init__(
         self, cell: SettingsCell | None = None, block: int | None = None, vst: VstRegistry | None = None
     ) -> None:
         """``block``: the block size every ``process`` call will use. A multiple of 480 (the worker's 480) saves the
-        10 ms output queue (``latency`` 960 instead of ``LATENCY``); None allows any block size. ``vst``: the engine's
+        10 ms output queue (``latency`` 480 instead of ``LATENCY``); None allows any block size. ``vst``: the engine's
         loaded VST plug-ins (none offline)."""
         self.cell = cell if cell is not None else SettingsCell()
         s = self.cell.value

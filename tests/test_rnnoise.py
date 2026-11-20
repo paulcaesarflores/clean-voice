@@ -1,8 +1,11 @@
 """The bundled RNNoise library and its ctypes binding."""
 
+import ctypes
 import struct
 
 import numpy as np
+from scipy import signal
+from speech import FAN, RATE, noise
 
 from clean_voice import rnnoise
 from clean_voice.rnnoise import FRAME_SIZE, NATIVE_DIR, RNNoise
@@ -15,14 +18,13 @@ CPU_TYPES = {0x0100000C: "arm64", 0x01000007: "x86_64"}
 
 
 def test_loads_and_denoises() -> None:
-    lib = rnnoise.load()
-    assert lib.rnnoise_get_frame_size() == FRAME_SIZE
+    rnnoise.load()
     denoiser = RNNoise()
-    rng = np.random.default_rng(0)
+    fan = noise(FAN)  # real fan noise: OBS's RNNoise, trained on such noise, leaves white noise almost untouched
     out = np.zeros(FRAME_SIZE, np.float32)
     energy_in = energy_out = 0.0
     for i in range(200):
-        frame = (rng.standard_normal(FRAME_SIZE) * 0.02).astype(np.float32)
+        frame = fan[i * FRAME_SIZE : (i + 1) * FRAME_SIZE].astype(np.float32)
         vad = denoiser.process(frame, out)
         assert 0.0 <= vad <= 1.0
         if i >= 50:
@@ -30,6 +32,39 @@ def test_loads_and_denoises() -> None:
             energy_out += float(np.sum(out.astype(np.float64) ** 2))
     denoiser.close()
     assert 10 * np.log10(energy_out / energy_in) < -20
+
+
+def _denoise(x: np.ndarray) -> np.ndarray:
+    denoiser = RNNoise()
+    out = np.zeros(len(x) // FRAME_SIZE * FRAME_SIZE, np.float32)
+    for i in range(0, len(out), FRAME_SIZE):
+        denoiser.process(x[i : i + FRAME_SIZE].astype(np.float32), out[i : i + FRAME_SIZE])
+    denoiser.close()
+    return out
+
+
+def test_fan_only_pauses_are_as_quiet_as_obs() -> None:
+    # B005: fan.wav through OBS's RNNoise leaves about -76 dB, RNNoise 0.2 about -57 dB (audit p9: the fan after the 80 Hz
+    # high-pass, as RNNoise sees it in the chain; whole-output RMS).
+    fan = noise(FAN)[: 10 * RATE]
+    x = np.asarray(signal.sosfilt(signal.butter(4, 80, "highpass", fs=RATE, output="sos"), fan), np.float32)
+    out = _denoise(x)
+    assert 20 * np.log10(np.sqrt(np.mean(out.astype(np.float64) ** 2)) + 1e-12) < -70.0
+
+
+def test_lag_is_one_frame() -> None:
+    # B005: OBS's RNNoise delays its output by 480 samples (10 ms), 0.2 by 960.
+    x = np.zeros(20 * FRAME_SIZE, np.float32)
+    x[5 * FRAME_SIZE + 100] = 0.5
+    out = _denoise(x)
+    assert int(np.argmax(np.abs(out))) - (5 * FRAME_SIZE + 100) == FRAME_SIZE
+
+
+def test_exports_obs_api() -> None:
+    # B005: OBS's rnnoise.h has rnnoise_get_size and no rnnoise_get_frame_size.
+    lib = ctypes.CDLL(str(rnnoise.library_path()))
+    assert hasattr(lib, "rnnoise_get_size")
+    assert not hasattr(lib, "rnnoise_get_frame_size")
 
 
 def _macho_min_os(blob: bytes) -> tuple[int, int]:

@@ -1,81 +1,56 @@
 """Build the RNNoise shared libraries that Clean Voice loads with ctypes.
 
-No RNNoise binding on PyPI installs from wheels on Windows and macOS 13+ with MIT-compatible dependencies, so Clean
-Voice ships librnnoise itself (BSD-3-Clause, Xiph.Org) and binds it with ``clean_voice.rnnoise`` (ctypes).
+Clean Voice ships the RNNoise that OBS Studio bundles (BSD-3-Clause, Xiph.Org), built from OBS's
+``plugins/obs-filters/rnnoise`` folder (``reference/obs-studio``) and bound with ``clean_voice.rnnoise`` (ctypes).
 
 Run from the project folder after ``pip install --group native``:
 
     .venv/Scripts/python tools/rnnoise/build_rnnoise.py
 
-It downloads the RNNoise 0.2 release tarball (checked against a pinned SHA-256), cross-compiles it with Zig for
-Windows x64 and for macOS 13 arm64 and x86_64, merges the two macOS builds into one universal dylib, and writes
-the results and the RNNoise license to ``src/clean_voice/native/``.
+It cross-compiles OBS's copy with Zig for Windows x64 and for macOS 13 arm64 and x86_64, merges the two macOS builds
+into one universal dylib, and writes the results and the RNNoise license to ``src/clean_voice/native/``.
 """
 
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
 import struct
 import subprocess
 import sys
-import tarfile
-import tempfile
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = ROOT / "src" / "clean_voice" / "native"
 CACHE_DIR = ROOT / ".cache" / "zig"
+SRC = ROOT / "reference" / "obs-studio" / "plugins" / "obs-filters" / "rnnoise"
+TOP = "rnnoise"
 
-URL = "https://github.com/xiph/rnnoise/releases/download/v0.2/rnnoise-0.2.tar.gz"
-SHA256 = "90fce4b00b9ff24c08dbfe31b82ffd43bae383d85c5535676d28b0a2b11c0d37"
-TOP = "rnnoise-0.2"
-
-# The library sources, as listed in RNNoise's Makefile.am (no x86 run-time dispatch: plain C runs everywhere).
+# The source list OBS builds: plugins/obs-filters/cmake/rnnoise.cmake:13-34.
 SOURCES = [
     "src/denoise.c",
     "src/rnn.c",
     "src/pitch.c",
     "src/kiss_fft.c",
     "src/celt_lpc.c",
-    "src/nnet.c",
-    "src/nnet_default.c",
-    "src/parse_lpcnet_weights.c",
-    "src/rnnoise_data.c",
-    "src/rnnoise_tables.c",
+    "src/rnn_data.c",
+    "src/rnn_reader.c",
 ]
-# x86_64 builds stay at the SSE2 baseline every x64 CPU has; RNNoise's #warning about AVX is silenced.
-COMMON_FLAGS = ["-shared", "-O2", "-fvisibility=hidden", "-Wno-#warnings", "-DRNNOISE_BUILD", "-Iinclude", "-Isrc"]
-
-OS_SUPPORT_SHIM = """#ifndef OS_SUPPORT_H
-#define OS_SUPPORT_H
-#include "common.h"
-#define OPUS_CLEAR(dst, n) RNN_CLEAR(dst, n)
-#define OPUS_COPY(dst, src, n) RNN_COPY(dst, src, n)
-#define OPUS_MOVE(dst, src, n) RNN_MOVE(dst, src, n)
-#endif
-"""
+# -DCOMPILE_OPUS as rnnoise.cmake:40; x86_64 builds stay at the SSE2 baseline every x64 CPU has.
+COMMON_FLAGS = [
+    "-shared",
+    "-O2",
+    "-fvisibility=hidden",
+    "-Wno-#warnings",
+    "-DRNNOISE_BUILD",
+    "-DCOMPILE_OPUS",
+    "-Iinclude",
+    "-Isrc",
+]
 
 MACHO_MAGIC_64 = 0xFEEDFACF
 FAT_MAGIC = 0xCAFEBABE
 FAT_ALIGN = 14  # 16 KiB, the arm64 page size
-
-
-def download(dest: Path) -> Path:
-    archive = dest / "rnnoise-0.2.tar.gz"
-    with urllib.request.urlopen(URL, timeout=120) as response:
-        archive.write_bytes(response.read())
-    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    if digest != SHA256:
-        raise SystemExit(f"rnnoise-0.2.tar.gz SHA-256 mismatch: {digest}")
-    with tarfile.open(archive) as tar:
-        tar.extractall(dest, filter="data")
-    src = dest / TOP
-    # The 0.2 release tarball lacks src/os_support.h, which the NEON (arm64) code includes for OPUS_CLEAR.
-    (src / "src" / "os_support.h").write_text(OS_SUPPORT_SHIM, encoding="ascii")
-    return src
 
 
 def zig_cc(src: Path, target: str, output: Path, extra: list[str]) -> None:
@@ -113,17 +88,16 @@ def merge_universal(slices: list[Path], output: Path) -> None:
 def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_name:
-        tmp = Path(tmp_name)
-        src = download(tmp)
-        zig_cc(src, "x86_64-windows-gnu", OUT_DIR / "rnnoise.dll", ["-DWIN32", "-DDLL_EXPORT"])
-        thin: list[Path] = []
-        for arch in ("aarch64", "x86_64"):
-            path = tmp / f"librnnoise-{arch}.dylib"
-            zig_cc(src, f"{arch}-macos.13.0", path, ["-Wl,-install_name,@loader_path/librnnoise.dylib"])
-            thin.append(path)
-        merge_universal(thin, OUT_DIR / "librnnoise.dylib")
-        shutil.copyfile(src / "COPYING", OUT_DIR / "RNNOISE-COPYING.txt")
+    scratch = CACHE_DIR / "thin"
+    scratch.mkdir(parents=True, exist_ok=True)
+    zig_cc(SRC, "x86_64-windows-gnu", OUT_DIR / "rnnoise.dll", ["-DWIN32", "-DDLL_EXPORT"])
+    thin: list[Path] = []
+    for arch in ("aarch64", "x86_64"):
+        path = scratch / f"librnnoise-{arch}.dylib"
+        zig_cc(SRC, f"{arch}-macos.13.0", path, ["-Wl,-install_name,@loader_path/librnnoise.dylib"])
+        thin.append(path)
+    merge_universal(thin, OUT_DIR / "librnnoise.dylib")
+    shutil.copyfile(SRC / "COPYING", OUT_DIR / "RNNOISE-COPYING.txt")
     for leftover in OUT_DIR.glob("*.lib"):
         leftover.unlink()
     for leftover in OUT_DIR.glob("*.pdb"):
