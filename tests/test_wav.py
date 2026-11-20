@@ -5,6 +5,7 @@ import struct
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 import wave
 from pathlib import Path
@@ -156,8 +157,10 @@ def test_a_slow_disk_write_does_not_block_the_caller(tmp_path: Path) -> None:
     rec = Recorder(tmp_path)
     real = rec.clean.write
 
+    disk_free = threading.Event()
+
     def slow(samples: np.ndarray) -> None:
-        time.sleep(0.3)
+        disk_free.wait(10)  # the disk stays stuck until the test lets go, however slow the runner is
         real(samples)
 
     rec.clean.write = slow  # type: ignore[method-assign]
@@ -165,7 +168,9 @@ def test_a_slow_disk_write_does_not_block_the_caller(tmp_path: Path) -> None:
     start = time.perf_counter()
     for _ in range(3):
         rec.write(block, block)
-    assert time.perf_counter() - start < 0.05
+    returned_s = time.perf_counter() - start
+    disk_free.set()
+    assert returned_s < 5.0, returned_s  # a caller held by the stuck disk would have waited the full 10 s
     rec.close()
     assert rec.error is None
     assert len(read_wav(next(tmp_path.glob("* clean voice.wav")))[1]) == 3 * 480

@@ -437,7 +437,7 @@ def test_run_never_waits_for_a_load_in_progress() -> None:
     wait_for(lambda: effect._lock.locked())  # the load thread holds the lock, inside Load
     start = time.perf_counter()
     effect.run(np.zeros(480, np.float32))
-    assert time.perf_counter() - start < 0.05  # OBS's mutex would wait for the whole load (:656)
+    assert time.perf_counter() - start < 5.0  # OBS's mutex would wait for the whole load (:656), here for ever
     api.load_gate.set()
     wait_for(lambda: effect.ready)
 
@@ -591,7 +591,7 @@ def test_the_audio_side_never_waits_for_the_runtime_check(runtime: Any, monkeypa
         f = make_nv(None, block=BLOCK)
         x = np.full(BLOCK, 0.25, np.float32)
         assert np.array_equal(f.process(x), x)
-        assert time.perf_counter() - start < 0.05
+        assert time.perf_counter() - start < 5.0  # the lock is held by the test, so a wait would be for ever
     finally:
         nvafx._probe_lock.release()
     rt, _api = fake()

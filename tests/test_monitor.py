@@ -10,7 +10,7 @@ from drift_sim import SimTime, simulate
 from test_engine import CABLE, CABLE_REC, HEADPHONES, MIC, SPEAKERS, VOICEMEETER, wait_for
 
 import clean_voice.engine as engine_module
-from clean_voice.audio_path import MIC_TEST_S, SAMPLE_RATE, AudioPath, MicTestState
+from clean_voice.audio_path import BLOCK, MIC_TEST_S, SAMPLE_RATE, AudioPath, MicTestState
 from clean_voice.devices import Device, monitor_device
 from clean_voice.dsp import PassThrough
 from clean_voice.engine import State
@@ -68,21 +68,19 @@ def test_a_lost_monitor_device_turns_hear_myself_off(make_engine) -> None:
     engine.set_monitor(True)
     wait_for(lambda: engine.status().monitor)
     wait_for(lambda: engine.status().recording_seconds > 1.0)
-    before = engine.status().counters
     opened = list(backend.opened)
     backend.present.remove(HEADPHONES)
-    t0 = time.monotonic()
-    wait_for(lambda: not engine.status().monitor, timeout=2.0)
-    assert time.monotonic() - t0 < 2.0
+    wait_for(lambda: not engine.status().monitor, timeout=2.0)  # the bound is wait_for's own
     status = engine.status()
     assert status.monitor_error and "Hear myself" in status.monitor_error
     assert status.state is State.ON and backend.opened == opened
-    after = status.counters
-    assert (after.underruns, after.input_overflows, after.output_overflows) == (
-        before.underruns,
-        before.input_overflows,
-        before.output_overflows,
-    )
+    # The voice to Meet carries on: the same streams keep calling and the worker keeps processing. (Not an exact
+    # underrun count: the mic and cable are two sleep-paced threads, so a slow runner can add one on its own.)
+    path = engine._path
+    assert path is not None
+    blocks, calls = path.blocks_processed, path.cable.callbacks
+    wait_for(lambda: path.blocks_processed > blocks + 20 and path.cable.callbacks > calls + 20)
+    assert engine.status().state is State.ON and backend.opened == opened and not any(s.closed for s in opened)
 
 
 def guard(real, inside: list[bool]):
@@ -172,18 +170,16 @@ def test_slow_speaker_streams_never_hold_up_the_voice(make_engine) -> None:
     assert path is not None
     engine.set_monitor(True)
     engine.set_echo(True)
-    t0 = time.monotonic()
-    blocks = path.blocks_processed
-    longest = 0.0
-    last = (blocks, t0)
-    while time.monotonic() - t0 < 2.0:
-        n = path.blocks_processed
-        now = time.monotonic()
-        if n != last[0]:
-            last = (n, now)
-        longest = max(longest, now - last[1])
+    # Measured in what the mic delivered that the worker had not yet processed, not in seconds: the fake mic's 10 ms
+    # sleeps run long on a slow runner (CI run 43368578097). A worker held up by the 0.4 s open falls behind the mic.
+    start = path.in_ring.total_written
+    mic_to_go = start + 2 * SAMPLE_RATE  # watch until the mic has delivered 2 s more (the open takes 0.4 s)
+    behind = 0.0
+    while path.in_ring.total_written < mic_to_go:
+        done = path.blocks_processed * BLOCK * path.in_rate / SAMPLE_RATE
+        behind = max(behind, (path.in_ring.total_written - done) / path.in_rate)
         time.sleep(0.005)
-    assert longest < 0.15, f"the worker stood still for {longest * 1000:.0f} ms"
+    assert behind < 0.15, f"the worker fell {behind * 1000:.0f} ms of audio behind the mic"
     # Echo removal opens the loopback on Windows only; on a Mac it is unavailable and never opens one (DESIGN).
     loopbacks = 1 if engine_module.echo_platform_reason() is None else 0
     wait_for(lambda: len(backend.streams_of("loopback")) == loopbacks and engine.status().monitor)
@@ -304,10 +300,36 @@ def test_hear_myself_resumes_after_a_mic_test(make_engine) -> None:
     # The playback moves one block per fake mic block: 5.1 s of them, whose 10 ms sleeps ran ~4x long on the macOS
     # runner (CI run 43368578097), so the wait allows for a slow machine.
     wait_for(lambda: engine.status().mic_test is MicTestState.IDLE, timeout=60)
-    time.sleep(0.3)
     streams = backend.streams_of("output", SPEAKERS)
+    played = backend.played[SPEAKERS.name]
+    after_test = len(played)
+    # Live voice reaches the speakers again: wait for the fake speaker to play more than the ring holds, then for a
+    # block of voice. The speaker and the mic are two sleep-paced threads, so a slow runner can leave the speaker one
+    # block short now and then (CI run 44775644564); an exact underrun count would test the scheduler, not this.
+    wait_for(lambda: len(played) > after_test + 50 and bool(np.any(played[-1] != 0)), timeout=60)
     assert len(streams) == 1 and not streams[0].closed and engine.status().monitor
     assert path.monitor is not None and not path.monitor.finishing
+
+
+def test_hear_myself_has_no_underrun_after_a_mic_test() -> None:
+    # T3, the exact count: live voice, the test playback, live voice again, driven from one loop so no scheduler is
+    # involved (the engine test above runs the same on threads and cannot count to zero on a slow runner).
+    path = AudioPath(SAMPLE_RATE, 2, SAMPLE_RATE, 2, PassThrough())
+    path.add_monitor(SAMPLE_RATE, 2)
+    path.monitor_live = True
+    _, to_monitor = drive(path, 20)  # the spy on the sink's push keeps filling this list in the later calls
+    path.mic_test.start()
+    path.mic_test.recorded = path.mic_test.buffer.shape[0] - 4800  # 100 ms of recording left
+    drive(path, 1)
+    n = int(MIC_TEST_S * SAMPLE_RATE / 480)
+    for _ in range(2 * n + 40):
+        drive(path, 1)
+        if path.mic_test.state is MicTestState.IDLE:
+            break
+    assert path.mic_test.state is MicTestState.IDLE
+    drive(path, 60)
+    assert path.monitor is not None and not path.monitor.finishing
+    assert np.any(np.concatenate(to_monitor[-10:]) != 0)  # live voice again
     assert path.status_counters().monitor_underruns == 0
 
 

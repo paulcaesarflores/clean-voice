@@ -849,11 +849,10 @@ def test_a_cable_stall_keeps_the_mic_and_the_backup(make_engine) -> None:
     wait_for(lambda: engine.status().state is State.ON)
     assert path.in_ring.total_written > mic_at_stall, "the mic stopped delivering while the cable was down"
     time.sleep(0.5)
-    recorded = engine.status().recording_seconds - rec0
     delivered = (path.in_ring.total_written - mic0) / 48_000
     assert not first.closed, "the mic stream (and so the backup) was stopped by a cable-only stall"
     assert len(backend.opened) == 1 and engine._path is path  # the mic was never reopened
-    assert recorded >= delivered - 0.15, f"the backup got {recorded:.2f} s of the {delivered:.2f} s the mic delivered"
+    wait_for(lambda: engine.status().recording_seconds - rec0 >= delivered - 0.15)  # the writer thread follows the mic
     played = engine.status().counters.underruns
     wait_for(lambda: backend.streams_of("output", CABLE) and backend.streams_of("output", CABLE)[-1].calls > 20)
     assert engine.status().counters.underruns <= played + 1  # the reopened cable plays the voice again
