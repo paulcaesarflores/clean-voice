@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import time
+import threading
 
 import numpy as np
 import pytest
@@ -10,7 +10,7 @@ from drift_sim import SimTime, simulate
 from test_engine import CABLE, CABLE_REC, HEADPHONES, MIC, SPEAKERS, VOICEMEETER, wait_for
 
 import clean_voice.engine as engine_module
-from clean_voice.audio_path import BLOCK, MIC_TEST_S, SAMPLE_RATE, AudioPath, MicTestState
+from clean_voice.audio_path import MIC_TEST_S, SAMPLE_RATE, AudioPath, MicTestState
 from clean_voice.devices import Device, monitor_device
 from clean_voice.dsp import PassThrough
 from clean_voice.engine import State
@@ -157,29 +157,34 @@ def test_slow_speaker_streams_never_hold_up_the_voice(make_engine) -> None:
     wait_for(lambda: engine.status().state is State.ON)
     real_output, real_loopback = backend.open_output, backend.open_loopback
 
-    def slow(real):
+    gate = threading.Event()  # a device that will not open until the test lets it
+    entered = threading.Event()
+    opened_on: list[str] = []
+
+    def stuck(real):
         def call(*args, **kwargs):
-            time.sleep(0.4)
+            opened_on.append(threading.current_thread().name)
+            entered.set()
+            gate.wait(30)
             return real(*args, **kwargs)
 
         return call
 
-    backend.open_output = slow(real_output)  # type: ignore[method-assign]
-    backend.open_loopback = slow(real_loopback)  # type: ignore[method-assign]
+    backend.open_output = stuck(real_output)  # type: ignore[method-assign]
+    backend.open_loopback = stuck(real_loopback)  # type: ignore[method-assign]
     path = engine._path
     assert path is not None
-    engine.set_monitor(True)
-    engine.set_echo(True)
-    # Measured in what the mic delivered that the worker had not yet processed, not in seconds: the fake mic's 10 ms
-    # sleeps run long on a slow runner (CI run 43368578097). A worker held up by the 0.4 s open falls behind the mic.
-    start = path.in_ring.total_written
-    mic_to_go = start + 2 * SAMPLE_RATE  # watch until the mic has delivered 2 s more (the open takes 0.4 s)
-    behind = 0.0
-    while path.in_ring.total_written < mic_to_go:
-        done = path.blocks_processed * BLOCK * path.in_rate / SAMPLE_RATE
-        behind = max(behind, (path.in_ring.total_written - done) / path.in_rate)
-        time.sleep(0.005)
-    assert behind < 0.15, f"the worker fell {behind * 1000:.0f} ms of audio behind the mic"
+    try:
+        engine.set_monitor(True)
+        engine.set_echo(True)
+        wait_for(lambda: entered.is_set())
+        # While the device is stuck inside its open, the worker keeps processing the mic. Waiting for blocks, not
+        # timing them: a scheduler-starved worker only takes longer, a worker stuck in the open never gets there.
+        blocks = path.blocks_processed
+        wait_for(lambda: path.blocks_processed > blocks + 20, timeout=20)
+    finally:
+        gate.set()
+    assert "clean-voice-audio" not in opened_on  # the device thread opened them, not the worker
     # Echo removal opens the loopback on Windows only; on a Mac it is unavailable and never opens one (DESIGN).
     loopbacks = 1 if engine_module.echo_platform_reason() is None else 0
     wait_for(lambda: len(backend.streams_of("loopback")) == loopbacks and engine.status().monitor)
