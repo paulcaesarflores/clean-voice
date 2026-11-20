@@ -1,6 +1,6 @@
-"""The 10-band EQ's panel in Fine-tune's properties area (B012): a dark card with a frequency-response graph on top
+"""The 10-band EQ's panel in Fine-tune's properties area (B012): a card (in the window's theme, B016) with a frequency-response graph on top
 (a dot per band to drag, the wheel over a dot changes its Q) and a row per band below it (on, number, gain, frequency,
-Q, type), then the output trim. It is Clean Voice's own look in the dark palette's colours, with no branding from any
+Q, type), then the output trim. It is Clean Voice's own look in the palette's colours, with no branding from any
 other EQ. The maths is ``parametric_eq``; the panel only edits the filter's settings and reports every change as
 ``changed(key, value)``, which the filter window publishes like any other property edit.
 """
@@ -27,11 +27,11 @@ from PySide6.QtWidgets import (
 )
 
 from clean_voice import parametric_eq as pe
-from clean_voice.theme import DARK, rgba
+from clean_voice import theme
+from clean_voice.theme import DARK, LIGHT, Palette, rgba
 from clean_voice.widgets import paint_icon
 
-PAL = DARK  # the card is dark in both themes, like a piece of studio kit
-# One colour per band, picked to stay apart on the dark card.
+# One colour per band, picked to stay apart on the dark card; on the light card they are darkened (band_color).
 BAND_COLORS = (
     "#F06A63",
     "#F0903C",
@@ -51,6 +51,17 @@ WHEEL_Q = 1.12  # one wheel notch multiplies Q by this
 GRID_LABELS = ("31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k")
 LOG_SPAN = math.log(pe.FREQ_RANGE[1] / pe.FREQ_RANGE[0])
 CURVE_POINTS = 240
+
+
+def band_color(i: int, pal: Palette) -> str:
+    """Band ``i``'s colour: as is on the dark card, darkened on the light one so the yellow and lime still read."""
+    c = BAND_COLORS[i - 1]
+    return c if pal.dark else QColor(c).darker(150).name()
+
+
+def on_dot(color: str) -> str:
+    """The number on a dot: the dark theme's ink on a light dot, white on a dark one."""
+    return DARK.band if QColor(color).lightness() > 110 else LIGHT.on_desk
 
 
 def _alpha(color: str, a: float) -> QColor:
@@ -75,6 +86,7 @@ class EqGraph(QWidget):
     def __init__(self, values: dict[str, Any]) -> None:
         super().__init__()
         self.values = values  # the panel's settings, read live at every paint
+        self.pal = theme.current()
         self.dragging: int | None = None
         self.hover: int | None = None
         self.setMouseTracking(True)
@@ -187,6 +199,7 @@ class EqGraph(QWidget):
     # -------------------------------------------------------------- painting
 
     def paintEvent(self, event: object) -> None:
+        PAL = self.pal
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = self.plot()
@@ -247,15 +260,16 @@ class EqGraph(QWidget):
             c.setY(_clamp(c.y(), r.top(), r.bottom()))
             lit = i in (self.dragging, self.hover)
             if lit:
-                halo = QColor(BAND_COLORS[i - 1] if on else PAL.muted)
+                halo = QColor(band_color(i, PAL) if on else PAL.muted)
                 halo.setAlphaF(0.3)
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(halo)
                 p.drawEllipse(c, DOT + 5, DOT + 5)
             p.setPen(QPen(QColor(PAL.band), 1.5))
-            p.setBrush(QColor(BAND_COLORS[i - 1] if on else "#56636F"))
+            fill = band_color(i, PAL) if on else PAL.muted  # an off band is grey
+            p.setBrush(QColor(fill))
             p.drawEllipse(c, DOT, DOT)
-            p.setPen(QColor(PAL.on_desk if on else PAL.ink))
+            p.setPen(QColor(on_dot(fill)))
             p.drawText(QRectF(c.x() - DOT, c.y() - DOT, 2 * DOT, 2 * DOT), int(Qt.AlignmentFlag.AlignCenter), str(i))
         # what the band under the pointer says
         i = self.dragging or self.hover
@@ -298,6 +312,7 @@ class _OnButton(QAbstractButton):
     def __init__(self, color: str, name: str) -> None:
         super().__init__()
         self.color = color
+        self.pal = theme.current()
         self.setCheckable(True)
         self.setFixedSize(24, 24)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -305,6 +320,7 @@ class _OnButton(QAbstractButton):
         self.setToolTip(name)
 
     def paintEvent(self, event: object) -> None:
+        PAL = self.pal
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         c = QPointF(self.width() / 2, self.height() / 2)
@@ -326,6 +342,7 @@ class _Drop(QComboBox):
 
     def __init__(self, name: str) -> None:
         super().__init__()
+        self.pal = theme.current()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleName(name)
 
@@ -333,7 +350,7 @@ class _Drop(QComboBox):
         super().paintEvent(event)  # type: ignore[arg-type]
         p = QPainter(self)  # Clean Voice's chevron, as the app's other dropdowns draw it (filter_window.Combo)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        paint_icon(p, "chevron", QRectF(self.width() - 22.0, self.height() / 2.0 - 7.0, 14, 14), PAL.muted, 1.8)
+        paint_icon(p, "chevron", QRectF(self.width() - 22.0, self.height() / 2.0 - 7.0, 14, 14), self.pal.muted, 1.8)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if not self.hasFocus():
@@ -345,8 +362,8 @@ class _Drop(QComboBox):
 class BandRow:
     """One band's controls; ``on``, ``gain``, ``slope``, ``freq``, ``q`` and ``type`` (the dropdown) are for the tests. A low or high cut shows the slope list where the (unused) gain box would be."""
 
-    def __init__(self, number: int) -> None:
-        color = BAND_COLORS[number - 1]
+    def __init__(self, number: int, pal: Palette) -> None:
+        color = band_color(number, pal)
         self.number = number
         self.on = _OnButton(color, f"Band {number} on")
         self.label = QLabel(str(number))
@@ -380,7 +397,7 @@ class BandRow:
         self.q.setEnabled(not cut)  # a cut's slope fixes its response: the Q is greyed out and kept
 
 
-def panel_style() -> str:
+def panel_style(PAL: Palette) -> str:
     return f"""
 QWidget#eqPanel {{ background: {PAL.band}; border: 1px solid {PAL.line}; border-radius: 8px; }}
 QLabel {{ color: {PAL.ink}; font-size: 12px; background: transparent; }}
@@ -406,11 +423,12 @@ class EqPanel(QWidget):
 
     changed = Signal(str, object)
 
-    def __init__(self, settings: Mapping[str, object]) -> None:
+    def __init__(self, settings: Mapping[str, object], pal: Palette | None = None) -> None:
         super().__init__()
+        self.pal = pal or theme.current()
         self.setObjectName("eqPanel")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
-        self.setStyleSheet(panel_style())
+        self.setStyleSheet(panel_style(self.pal))
         self.values: dict[str, Any] = dict(settings)
         column = QVBoxLayout(self)
         column.setContentsMargins(12, 10, 12, 10)
@@ -428,7 +446,7 @@ class EqPanel(QWidget):
             grid.addWidget(head, 0, col)
         self.rows: list[BandRow] = []
         for n in range(1, pe.BANDS + 1):
-            row = BandRow(n)
+            row = BandRow(n, self.pal)
             self.rows.append(row)
             grid.addWidget(row.on, n, 0)
             grid.addWidget(row.label, n, 1)
@@ -455,7 +473,21 @@ class EqPanel(QWidget):
         trim_row.addWidget(self.trim)
         trim_row.addStretch(1)
         column.addLayout(trim_row)
+        self.set_theme(self.pal)
         self._load()
+
+    def set_theme(self, pal: Palette) -> None:
+        """Show the card in ``pal`` (the window's theme, also when it changes while the window is open)."""
+        self.pal = pal
+        self.setStyleSheet(panel_style(pal))
+        self.graph.pal = pal
+        for row in self.rows:
+            color = band_color(row.number, pal)
+            row.on.color = color
+            row.on.pal = row.slope.pal = row.type.pal = pal
+            row.label.setStyleSheet(f"color: {color}; font-weight: 700; font-size: 14px;")
+        for widget in self.findChildren(QWidget):
+            widget.update()
 
     def _load(self) -> None:
         """Show ``values`` in every box and button (no change is emitted)."""

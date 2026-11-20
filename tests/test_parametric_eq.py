@@ -24,6 +24,7 @@ from clean_voice.eq_panel import EqPanel
 from clean_voice.fine_tune import EQ_KIND, FilterSpec, new_filter
 from clean_voice.prefs import Prefs
 from clean_voice.settings import Settings
+from clean_voice.theme import DARK, LIGHT, Palette
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 import audio_check
@@ -266,6 +267,34 @@ def test_the_graph_draws_and_marks_a_disabled_band_grey(qtbot: QtBot) -> None:
     assert not image.isNull() and image.width() > 300
     assert p.graph.dot_pos(3).x() > 0  # every band has a dot, on or off
     assert p.graph.curve_db(1000.0) == pytest.approx(6.0, abs=1.0)  # one band on: the summed curve
+
+
+@pytest.mark.parametrize("pal", [LIGHT, DARK], ids=["light", "dark"])
+def test_the_panel_and_graph_follow_the_theme(qtbot: QtBot, pal: Palette) -> None:  # B016
+    p = EqPanel(fine_tune.resolve(EQ_KIND, band(2, gain=6.0)), pal)
+    qtbot.addWidget(p)
+    p.resize(760, 760)
+    p.show()
+    qtbot.waitExposed(p)
+    g = p.graph
+    image = g.grab().toImage()
+    assert image.pixelColor(2, 2).name().upper() == pal.band.upper()  # the graph's frame
+    inside = QPoint(round(g.plot().left()) + 3, round(g.plot().top()) + 3)
+    assert image.pixelColor(inside).name().upper() == pal.surface.upper()  # the plot
+    assert pal.band in p.styleSheet() and pal.ink in p.styleSheet()
+    card = p.grab().toImage().pixelColor(2, p.height() // 2)
+    assert card.name().upper() in (pal.band.upper(), pal.line.upper())  # the card's edge, not the other palette
+    other = DARK if pal is LIGHT else LIGHT
+    assert other.band not in p.styleSheet()
+
+
+def test_the_panel_changes_theme_with_the_open_window(make, qtbot: QtBot) -> None:  # noqa: F811
+    window, _ = make(Settings(fine_tune=True, filters=(new_filter(EQ_KIND, ()),)))
+    eq = window.pane.controls["eq"]
+    window.set_theme(DARK)
+    assert DARK.band in eq.styleSheet() and eq.graph.pal is DARK
+    window.set_theme(LIGHT)
+    assert LIGHT.band in eq.styleSheet() and eq.graph.pal is LIGHT and eq.rows[0].on.pal is LIGHT
 
 
 def test_the_filter_window_shows_the_panel_and_saves_what_it_changes(make, qtbot: QtBot) -> None:  # noqa: F811

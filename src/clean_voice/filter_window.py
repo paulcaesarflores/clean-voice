@@ -559,7 +559,11 @@ class Pane(QWidget):
     clicked = Signal(str)  # a button's key
 
     def __init__(
-        self, spec: FilterSpec, plugins: Sequence[tuple[str, str]] = (), runtime: nvafx.Runtime | None = None
+        self,
+        spec: FilterSpec,
+        plugins: Sequence[tuple[str, str]] = (),
+        runtime: nvafx.Runtime | None = None,
+        pal: Palette | None = None,
     ) -> None:
         """``runtime``: NVIDIA's runtime, which only the NVIDIA filter's pane looks at."""
         super().__init__()
@@ -584,7 +588,7 @@ class Pane(QWidget):
         own_eq = spec.kind == fine_tune.EQ_KIND
         if own_eq:  # the 10-band EQ draws its own panel (B012) instead of one form row per property
             shown = []
-            eq = EqPanel(spec.settings)
+            eq = EqPanel(spec.settings, pal)
             eq.changed.connect(self._emit)
             self.controls["eq"] = eq
             form.addRow(eq)
@@ -1017,6 +1021,8 @@ class FilterWindow(QWidget):
     def set_theme(self, pal: Palette) -> None:
         self.palette_now = pal
         self.setStyleSheet(style_sheet(pal))
+        if self.pane is not None and isinstance(eq := self.pane.controls.get("eq"), EqPanel):
+            eq.set_theme(pal)  # the EQ panel has its own style sheet and painted parts (B016)
         for widget in self.findChildren(QWidget):
             widget.update()
 
@@ -1207,7 +1213,7 @@ class FilterWindow(QWidget):
                 plugins = self.model.scan()  # fill_out_plugins runs each time the properties are built (:302)
                 spec = self._unlisted_plugin(spec, plugins)
             self._plugins = plugins
-            pane = Pane(spec, plugins, self.runtime)
+            pane = Pane(spec, plugins, self.runtime, self.palette_now)
             pane.changed.connect(self._setting_changed)
             pane.clicked.connect(self._button_clicked)
             self.pane = pane
