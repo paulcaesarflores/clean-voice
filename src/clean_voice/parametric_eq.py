@@ -133,17 +133,18 @@ def _first_order(kind: str, freq: float) -> tuple[float, float, float, float, fl
 
 def sections(band: Band) -> tuple[tuple[float, ...], tuple[float, ...]]:
     """The band as exactly two second-order sections. Only a cut's slope changes them: 6 dB is a first-order section,
-    12 one biquad with the band's Q, 18 a first-order section and a biquad, 24 two biquads. For 18 and 24 the Q is
-    scaled so the default Q 0.7 gives a Butterworth cut (flat to the corner, then a clean slope) and a higher Q still
-    adds resonance."""
-    if not band.on or band.type not in ("low_cut", "high_cut") or band.slope == 12:
+    12 one biquad, 18 a first-order section and a biquad, 24 two biquads. A cut ignores the band's Q: its slope fixes
+    the plain Butterworth response (Q 0.7071; 1.0 after the first-order part; 0.5412 and 1.3066), and the stored Q is
+    left alone for when the band becomes a bell again."""
+    if not band.on or band.type not in ("low_cut", "high_cut"):
         return (section(band), IDENTITY)
     if band.slope == 6:
         return (_first_order(band.type, band.freq), IDENTITY)
-    if band.slope == 18:  # biquad Q = Q * (1 / 0.7071): 1.0 at the default, the Butterworth 3rd-order pole pair
-        return (_first_order(band.type, band.freq), section(replace(band, q=band.q / BUTTERWORTH_Q)))
-    first = replace(band, q=0.5412)  # 4th order: pole pairs Q 0.5412 and 1.3066
-    return (section(first), section(replace(band, q=band.q * 1.3066 / BUTTERWORTH_Q)))
+    if band.slope == 18:  # 3rd order: the first-order part and the pole pair at Q 1.0
+        return (_first_order(band.type, band.freq), section(replace(band, q=1.0)))
+    if band.slope == 24:  # 4th order: pole pairs Q 0.5412 and 1.3066
+        return (section(replace(band, q=0.5412)), section(replace(band, q=1.3066)))
+    return (section(replace(band, q=BUTTERWORTH_Q)), IDENTITY)
 
 
 def section_db(sos: tuple[float, ...], freqs: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:

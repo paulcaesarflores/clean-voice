@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from clean_voice import parametric_eq as pe
 from clean_voice.theme import DARK, rgba
+from clean_voice.widgets import paint_icon
 
 PAL = DARK  # the card is dark in both themes, like a piece of studio kit
 # One colour per band, picked to stay apart on the dark card.
@@ -77,12 +78,12 @@ class EqGraph(QWidget):
         self.dragging: int | None = None
         self.hover: int | None = None
         self.setMouseTracking(True)
-        self.setMinimumHeight(210)
+        self.setMinimumHeight(160)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setAccessibleName("EQ curve")
 
     def sizeHint(self) -> QSize:
-        return QSize(640, 280)
+        return QSize(640, 200)
 
     # -------------------------------------------------------------- the two scales
 
@@ -295,7 +296,7 @@ class _OnButton(QAbstractButton):
         super().__init__()
         self.color = color
         self.setCheckable(True)
-        self.setFixedSize(26, 26)
+        self.setFixedSize(24, 24)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAccessibleName(name)
         self.setToolTip(name)
@@ -314,67 +315,22 @@ class _OnButton(QAbstractButton):
             p.drawEllipse(c, 11.5, 11.5)
 
     def sizeHint(self) -> QSize:
-        return QSize(26, 26)
+        return QSize(24, 24)
 
 
-# Each type's icon, as a polyline on a 0..1 square (x along, y up).
-SHAPES: dict[str, list[tuple[float, float]]] = {
-    "bell": [(0.0, 0.3), (0.3, 0.3), (0.42, 0.55), (0.5, 0.8), (0.58, 0.55), (0.7, 0.3), (1.0, 0.3)],
-    "low_shelf": [(0.0, 0.75), (0.3, 0.75), (0.7, 0.3), (1.0, 0.3)],
-    "high_shelf": [(0.0, 0.3), (0.3, 0.3), (0.7, 0.75), (1.0, 0.75)],
-    "low_cut": [(0.0, 0.05), (0.35, 0.3), (0.55, 0.6), (0.75, 0.75), (1.0, 0.75)],
-    "high_cut": [(0.0, 0.75), (0.25, 0.75), (0.45, 0.6), (0.65, 0.3), (1.0, 0.05)],
-    "notch": [(0.0, 0.7), (0.38, 0.7), (0.5, 0.05), (0.62, 0.7), (1.0, 0.7)],
-}
-
-
-class _TypeButton(QAbstractButton):
-    """One type's button: its response shape as a small line drawing; the chosen one is filled."""
-
-    def __init__(self, kind: str, label: str) -> None:
-        super().__init__()
-        self.kind = kind
-        self.setCheckable(True)
-        self.setFixedSize(28, 24)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(label)
-        self.setAccessibleName(label)
-
-    def paintEvent(self, event: object) -> None:
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        box = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        on = self.isChecked()
-        p.setPen(QPen(QColor(PAL.desk if on else PAL.line), 1))
-        p.setBrush(
-            _alpha(PAL.desk, 0.22) if on else (QColor(PAL.hover) if self.underMouse() else Qt.BrushStyle.NoBrush)
-        )
-        p.drawRoundedRect(box, 4, 4)
-        inner = box.adjusted(6, 6, -6, -6)
-        path = QPainterPath()
-        for n, (x, y) in enumerate(SHAPES[self.kind]):
-            pt = QPointF(inner.left() + x * inner.width(), inner.bottom() - y * inner.height() / 0.8)
-            path.moveTo(pt) if n == 0 else path.lineTo(pt)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        pen = QPen(QColor(PAL.desk if on else PAL.muted), 1.6)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        p.setPen(pen)
-        p.drawPath(path)
-        if self.hasFocus():
-            p.setPen(QPen(QColor(PAL.desk), 2))
-            p.drawRoundedRect(box, 4, 4)
-
-
-class _SlopeBox(QComboBox):
-    """A cut's slope list ("6 dB" .. "24 dB"); like the number boxes it leaves the wheel to the pane unless focused."""
+class _Drop(QComboBox):
+    """A dropdown that, like the number boxes, leaves the wheel to the pane unless it has the focus."""
 
     def __init__(self, name: str) -> None:
         super().__init__()
-        for slope in pe.SLOPES:
-            self.addItem(f"{slope} dB", slope)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleName(name)
+
+    def paintEvent(self, event: object) -> None:
+        super().paintEvent(event)  # type: ignore[arg-type]
+        p = QPainter(self)  # Clean Voice's chevron, as the app's other dropdowns draw it (filter_window.Combo)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        paint_icon(p, "chevron", QRectF(self.width() - 22.0, self.height() / 2.0 - 7.0, 14, 14), PAL.muted, 1.8)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if not self.hasFocus():
@@ -384,8 +340,7 @@ class _SlopeBox(QComboBox):
 
 
 class BandRow:
-    """One band's controls; ``on``, ``gain``, ``slope``, ``freq``, ``q`` and ``types`` (kind -> button) are for the
-    tests. A low or high cut shows the slope list where the (unused) gain box would be."""
+    """One band's controls; ``on``, ``gain``, ``slope``, ``freq``, ``q`` and ``type`` (the dropdown) are for the tests. A low or high cut shows the slope list where the (unused) gain box would be."""
 
     def __init__(self, number: int) -> None:
         color = BAND_COLORS[number - 1]
@@ -398,26 +353,28 @@ class BandRow:
         self.gain = _Spin(*pe.GAIN_RANGE, 1, 0.5, " dB", f"Band {number} gain")
         self.freq = _Spin(*pe.FREQ_RANGE, 0, 1.0, " Hz", f"Band {number} frequency")
         self.q = _Spin(*pe.Q_RANGE, 2, 0.1, "", f"Band {number} Q")
-        self.slope = _SlopeBox(f"Band {number} slope")
-        self.types = {kind: _TypeButton(kind, label) for kind, label in pe.TYPES}
+        self.slope = _Drop(f"Band {number} slope")
+        for slope in pe.SLOPES:
+            self.slope.addItem(f"{slope} dB", slope)
+        self.type = _Drop(f"Band {number} type")
+        for kind, label in pe.TYPES:
+            self.type.addItem(label, kind)
         for w in (self.gain, self.freq, self.q):
-            w.setFixedWidth(86 if w is self.freq else 78)
-        self.slope.setFixedSize(78, 27)  # as tall as the number boxes
+            w.setFixedSize(86 if w is self.freq else 78, 24)
+        self.slope.setFixedSize(78, 24)  # as tall as the number boxes
+        self.type.setFixedSize(104, 24)
         self.kind = ""
 
     def show_type(self, kind: str) -> None:
         self.kind = kind
-        for k, button in self.types.items():
-            button.setChecked(k == kind)
+        self.type.blockSignals(True)
+        self.type.setCurrentIndex(max(0, self.type.findData(kind)))
+        self.type.blockSignals(False)
         cut = kind in ("low_cut", "high_cut")
         self.slope.setVisible(cut)
         self.gain.setVisible(not cut)
         self.gain.setEnabled(kind in pe.GAINED)  # a notch has no gain
-        self.show_slope(pe.SLOPES[self.slope.currentIndex()])
-
-    def show_slope(self, slope: int) -> None:
-        """A first-order cut (6 dB) has no Q to set."""
-        self.q.setEnabled(not (self.kind in ("low_cut", "high_cut") and slope == 6))
+        self.q.setEnabled(not cut)  # a cut's slope fixes its response: the Q is greyed out and kept
 
 
 def panel_style() -> str:
@@ -426,15 +383,16 @@ QWidget#eqPanel {{ background: {PAL.band}; border: 1px solid {PAL.line}; border-
 QLabel {{ color: {PAL.ink}; font-size: 12px; background: transparent; }}
 QLabel[role="eqHead"] {{ color: {PAL.muted}; font-size: 11px; }}
 QDoubleSpinBox {{ background: {PAL.surface}; color: {PAL.ink}; border: 1px solid {PAL.line}; border-radius: 4px;
-    padding: 3px 6px; font-size: 12px; selection-background-color: {rgba(PAL.desk, 0.3)}; }}
+    padding: 1px 6px; font-size: 12px; selection-background-color: {rgba(PAL.desk, 0.3)}; }}
 QDoubleSpinBox:focus {{ border: 1px solid {PAL.desk}; }}
 QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{ width: 0; border: none; }}
 QAbstractSpinBox QLineEdit {{ background: transparent; color: {PAL.ink}; border: none; padding: 0; }}
 QDoubleSpinBox:disabled {{ color: {PAL.muted}; background: {PAL.band}; }}
 QComboBox {{ background: {PAL.surface}; color: {PAL.ink}; border: 1px solid {PAL.line}; border-radius: 4px;
-    padding: 3px 6px; font-size: 12px; }}
+    padding: 1px 6px; font-size: 12px; }}
 QComboBox:focus {{ border: 1px solid {PAL.desk}; }}
-QComboBox::drop-down {{ border: none; width: 16px; }}
+QComboBox::drop-down {{ border: none; width: 22px; }}
+QComboBox::down-arrow {{ image: none; width: 0; height: 0; border: none; }}
 QComboBox QAbstractItemView {{ background: {PAL.surface}; color: {PAL.ink}; border: 1px solid {PAL.line};
     selection-background-color: {rgba(PAL.desk, 0.3)}; selection-color: {PAL.ink}; outline: none; }}
 """
@@ -452,15 +410,15 @@ class EqPanel(QWidget):
         self.setStyleSheet(panel_style())
         self.values: dict[str, Any] = dict(settings)
         column = QVBoxLayout(self)
-        column.setContentsMargins(12, 12, 12, 12)
-        column.setSpacing(10)
+        column.setContentsMargins(12, 10, 12, 10)
+        column.setSpacing(8)
         self.graph = EqGraph(self.values)
         self.graph.moved.connect(self._dragged)
         self.graph.q_turned.connect(lambda i, q: self._put(pe.key(i, "q"), q))
         column.addWidget(self.graph, 1)
         grid = QGridLayout()
         grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(5)
+        grid.setVerticalSpacing(3)
         for col, text in ((3, "Gain / slope"), (4, "Frequency"), (5, "Q"), (6, "Type")):
             head = QLabel(text)
             head.setProperty("role", "eqHead")
@@ -475,18 +433,13 @@ class EqPanel(QWidget):
             grid.addWidget(row.slope, n, 3)  # the same cell: a cut shows this, the other types the gain box
             grid.addWidget(row.freq, n, 4)
             grid.addWidget(row.q, n, 5)
-            kinds = QHBoxLayout()
-            kinds.setSpacing(4)
-            for button in row.types.values():
-                kinds.addWidget(button)
-            grid.addLayout(kinds, n, 6)
+            grid.addWidget(row.type, n, 6)
             row.on.toggled.connect(lambda on, n=n: self._put(pe.key(n, "on"), on))
             row.gain.valueChanged.connect(lambda v, n=n: self._put(pe.key(n, "gain"), round(v, 1)))
             row.freq.valueChanged.connect(lambda v, n=n: self._put(pe.key(n, "freq"), v))
             row.q.valueChanged.connect(lambda v, n=n: self._put(pe.key(n, "q"), v))
             row.slope.currentIndexChanged.connect(lambda i, n=n: self._put(pe.key(n, "slope"), pe.SLOPES[i]))
-            for kind, button in row.types.items():
-                button.clicked.connect(lambda _=False, n=n, kind=kind: self._put(pe.key(n, "type"), kind))
+            row.type.currentIndexChanged.connect(lambda i, n=n: self._put(pe.key(n, "type"), pe.TYPES[i][0]))
         grid.setColumnStretch(7, 1)
         column.addLayout(grid)
         trim_row = QHBoxLayout()
@@ -532,7 +485,6 @@ class EqPanel(QWidget):
             row.slope.blockSignals(True)
             row.slope.setCurrentIndex(pe.SLOPES.index(pe.snap_slope(value)))
             row.slope.blockSignals(False)
-            row.show_slope(pe.snap_slope(value))
         elif key.endswith(("_freq", "_gain", "_q")):  # a drag or the wheel: the box shows it too
             n = int(key[1 : key.index("_")])
             box = {"freq": self.rows[n - 1].freq, "gain": self.rows[n - 1].gain, "q": self.rows[n - 1].q}[

@@ -27,6 +27,16 @@ SCALES = (1, 2)
 THEMES = ("light", "dark")  # <state>.png is light, <state>-dark.png dark
 
 
+class _RoomyScreen:
+    """Stands in for QScreen with a big available area (the filter window asks only for ``availableGeometry``)."""
+
+    def __init__(self, area: object) -> None:
+        self.area = area
+
+    def availableGeometry(self) -> object:  # QScreen's name
+        return self.area
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", type=Path, required=True, help="folder for the PNG files")
@@ -147,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
             theme.use(pal)
             fwindow = filter_window.FilterWindow(fsample.model(), pal, args.platform, runtime=lambda: PREVIEW_RUNTIME)
             windows.append(fwindow)
+            # The EQ keeps to its screen's available area (B015); the offscreen screen is 800 x 800, so show it a roomy one.
+            fwindow.screen = lambda: _RoomyScreen(QRect(0, 0, 1920, 1080))  # type: ignore[method-assign]
             fwindow.show()
             fwindow.list.setCurrentRow(fsample.select)
             app.processEvents()

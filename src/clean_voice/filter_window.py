@@ -81,7 +81,7 @@ TITLE = "Fine-tune filters"  # OBS: "Filters for '%1'" (frontend/data/locale/en-
 LIST_TITLE = "Filters"  # OBS: "Audio Filters" (OBSBasicFilters.cpp:114-116)
 SIZE = (720, 480)
 MIN_SIZE = (600, 380)
-EQ_SIZE = (1000, 760)  # what the 10-band EQ's panel is shown in (B012)
+EQ_SIZE = (1000, 700)  # what the 10-band EQ's panel is shown in (B012); never more than the screen's available area
 LIST_W = 240
 EMPTY_TEXT = "Add a filter with +. The filters run from the top of the list down."
 NO_PROPERTIES = "This filter has no settings."  # OBS: "No properties available" (properties-view.cpp:160-163)
@@ -1213,11 +1213,23 @@ class FilterWindow(QWidget):
             self.pane = pane
             column.addWidget(pane)
             if spec.kind == fine_tune.EQ_KIND:  # the EQ's graph and ten rows need room: the window grows, never shrinks
-                self.resize(max(self.width(), EQ_SIZE[0]), max(self.height(), EQ_SIZE[1]))
+                self.fit_eq()
             if spec.kind == vst.KIND:
                 self.show_vst_state()
         column.addStretch(1)
         self.pane_scroll.setWidget(holder)
+
+    def fit_eq(self) -> None:
+        """The EQ's room (B015): grow to EQ_SIZE, but never past the screen's available area (QScreen.availableGeometry:
+        the taskbar and display scaling already taken out), frame included. Below that the pane scrolls."""
+        if self.pane is None or self.pane.controls.get("eq") is None:
+            return
+        room = self.screen().availableGeometry()
+        frame = self.frameGeometry()
+        extra_w, extra_h = max(0, frame.width() - self.width()), max(0, frame.height() - self.height())
+        w = min(max(self.width(), EQ_SIZE[0]), room.width() - extra_w)
+        h = min(max(self.height(), EQ_SIZE[1]), room.height() - extra_h)
+        self.resize(max(w, 1), max(h, 1))
 
     def _unlisted_plugin(self, spec: FilterSpec, plugins: list[tuple[str, str]]) -> FilterSpec:
         """AddList :700-708: a saved plug-in that isn't in the list found now makes the list's first entry the choice,
@@ -1305,6 +1317,7 @@ class FilterWindow(QWidget):
 
     def showEvent(self, event: object) -> None:
         super().showEvent(event)  # type: ignore[arg-type]
+        self.fit_eq()  # now the screen it opens on is known
         self.list.setFocus(Qt.FocusReason.OtherFocusReason)  # the list first, as OBS's dialog opens (:110-112)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:

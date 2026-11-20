@@ -10,10 +10,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 from pytestqt.qtbot import QtBot
 from speech import RATE, speech
 from test_filter_window import Host, make  # noqa: F401  (a pytest fixture)
@@ -253,9 +253,9 @@ def test_the_on_button_the_type_buttons_and_the_trim(qtbot: QtBot) -> None:
     assert not p.rows[2].on.isChecked()
     p.rows[2].on.click()
     assert p.values[pe.key(3, "on")] is True and (pe.key(3, "on"), True) in seen
-    assert p.rows[2].types["bell"].isChecked()
-    p.rows[2].types["notch"].click()
-    assert p.values[pe.key(3, "type")] == "notch" and not p.rows[2].types["bell"].isChecked()
+    assert p.rows[2].type.currentText() == "Bell"
+    p.rows[2].type.setCurrentIndex(5)
+    assert p.values[pe.key(3, "type")] == "notch" and p.rows[2].type.currentText() == "Notch"
     p.trim.setValue(-4.0)
     assert p.values["trim"] == -4.0 and ("trim", -4.0) in seen
 
@@ -340,10 +340,134 @@ def test_the_slope_dropdown_shows_only_for_cuts_and_changes_the_setting(qtbot: Q
     assert r1.slope.currentText() == "12 dB"
     r1.slope.setCurrentIndex(3)
     assert p.values[pe.key(1, "slope")] == 24 and (pe.key(1, "slope"), 24) in seen
-    assert r1.q.isEnabled()
+    assert not r1.q.isEnabled()
     r1.slope.setCurrentIndex(0)
     assert not r1.q.isEnabled()
-    r3.types["high_cut"].click()
+    r3.type.setCurrentIndex(4)
     assert not r3.slope.isHidden() and r3.gain.isHidden()
-    r1.types["bell"].click()
+    r1.type.setCurrentIndex(0)
     assert r1.slope.isHidden() and not r1.gain.isHidden() and r1.q.isEnabled()
+
+
+# ------------------------------------------------------------------ B015: the type dropdown and the fit
+
+
+def test_the_type_dropdown_lists_the_six_types_and_sets_each(qtbot: QtBot) -> None:
+    p, seen = panel(qtbot)
+    row = p.rows[2]
+    names = ["Bell", "Low shelf", "High shelf", "Low cut", "High cut", "Notch"]
+    assert [row.type.itemText(i) for i in range(row.type.count())] == names
+    for i, (kind, _) in sorted(enumerate(pe.TYPES), key=lambda t: t[1][0] == "bell"):
+        row.type.setCurrentIndex(i)
+        assert p.values[pe.key(3, "type")] == kind
+        assert (pe.key(3, "type"), kind) in seen
+    # a drag or a loaded setting that changes the type shows in the dropdown too
+    p._put(pe.key(3, "type"), "low_shelf")
+    assert row.type.currentText() == "Low shelf"
+
+
+def test_old_settings_show_in_the_type_dropdown(qtbot: QtBot) -> None:
+    p, seen = panel(qtbot, **band(4, type="high_shelf", gain=3.0), **band(5, type="notch"))
+    assert p.rows[3].type.currentText() == "High shelf" and p.rows[4].type.currentText() == "Notch"
+    assert p.rows[0].type.currentText() == "Low cut" and p.rows[9].type.currentText() == "High cut"
+    assert seen == []  # loading emits nothing
+
+
+def test_the_type_buttons_are_gone(qtbot: QtBot) -> None:
+    from PySide6.QtWidgets import QAbstractButton
+
+    p, _ = panel(qtbot)
+    assert not hasattr(p.rows[0], "types")
+    assert len(p.findChildren(QAbstractButton)) == pe.BANDS  # only the ten on/off rings
+
+
+def test_the_type_dropdown_leaves_the_wheel_to_the_pane_unless_focused(qtbot: QtBot) -> None:
+    p, _ = panel(qtbot)
+    box = p.rows[2].type
+    ev = wheel_on(box, -120)
+    assert not ev.isAccepted() and box.currentIndex() == 0
+
+
+def wheel_on(widget: QWidget, delta: int) -> QWheelEvent:
+    ev = QWheelEvent(
+        QPointF(5, 5),
+        widget.mapToGlobal(QPointF(5, 5)),
+        QPoint(0, 0),
+        QPoint(0, delta),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    QApplication.sendEvent(widget, ev)
+    return ev
+
+
+@pytest.mark.parametrize("available", [QRect(0, 0, 1280, 680), QRect(0, 0, 1920, 1032), QRect(0, 0, 1366, 728)])
+def test_the_eq_window_fits_the_available_screen_and_every_row_can_be_reached(
+    make,  # noqa: F811
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    available: QRect,
+) -> None:
+    class FakeScreen:
+        def availableGeometry(self) -> QRect:  # QScreen's name
+            return available
+
+    window, _ = make(Settings(fine_tune=True, filters=(new_filter(EQ_KIND, ()),)))
+    window.hide()  # the fixture shows it on the real screen: open it again on the fake one
+    monkeypatch.setattr(window, "screen", lambda: FakeScreen())
+    window.show()
+    qtbot.waitExposed(window)
+    QApplication.processEvents()
+    assert window.height() <= available.height() and window.width() <= available.width()
+    panel_ = window.pane.controls["eq"]
+    scroll = window.pane_scroll
+    view = scroll.viewport().rect()
+    for row in panel_.rows:
+        scroll.ensureWidgetVisible(row.type)
+        QApplication.processEvents()
+        spot = row.type.mapTo(scroll.viewport(), row.type.rect().topLeft())
+        assert view.contains(spot) and view.contains(spot + QPoint(row.type.width() - 1, row.type.height() - 1))
+    assert panel_.trim.isVisibleTo(window)
+    if available.height() >= 1000:  # a roomy screen needs no scrolling at all
+        assert scroll.verticalScrollBar().maximum() == 0
+
+
+@pytest.mark.parametrize("slope", [6, 12, 18, 24])
+@pytest.mark.parametrize("kind", ["low_cut", "high_cut"])
+def test_a_cut_ignores_q_in_the_sound_and_the_graph(kind: str, slope: int) -> None:
+    lo = band(5, type=kind, freq=1000.0, q=0.2, slope=slope)
+    hi = band(5, type=kind, freq=1000.0, q=15.0, slope=slope)
+    for f in (300.0, 900.0, 1000.0, 1100.0, 3000.0):
+        assert gain_db(lo, f) == pytest.approx(gain_db(hi, f), abs=1e-6)
+    s = fine_tune.resolve(EQ_KIND, hi)
+    for f in (300.0, 900.0, 1000.0, 1100.0, 3000.0):
+        assert pe.response_db(s, np.array([f]))[0] == pytest.approx(gain_db(hi, f), abs=0.15)
+    if slope != 6:  # the plain Butterworth: -3 dB at the cutoff
+        assert gain_db(hi, 1000.0) == pytest.approx(-3.0, abs=0.5)
+
+
+def test_the_q_box_is_disabled_for_both_cuts_at_every_slope_and_returns_with_a_bell(qtbot: QtBot) -> None:
+    p, _ = panel(qtbot, **band(3, q=2.5))
+    row = p.rows[2]
+    assert row.q.isEnabled()
+    for kind_index in (3, 4):  # low cut, high cut
+        row.type.setCurrentIndex(kind_index)
+        for slope_index in range(4):
+            row.slope.setCurrentIndex(slope_index)
+            assert not row.q.isEnabled()
+    assert p.values[pe.key(3, "q")] == 2.5 and row.q.value() == 2.5  # the stored Q is untouched
+    row.type.setCurrentIndex(0)
+    assert row.q.isEnabled() and p.values[pe.key(3, "q")] == 2.5
+
+
+def test_the_dropdowns_show_a_down_arrow(qtbot: QtBot) -> None:
+    p, _ = panel(qtbot)
+    for box in (p.rows[2].type, p.rows[0].slope):
+        image = box.grab().toImage()
+        far_right = [
+            image.pixelColor(x, y) for x in range(image.width() - 22, image.width() - 8) for y in range(image.height())
+        ]
+        bg = image.pixelColor(image.width() - 3, 2)
+        assert any(abs(c.lightness() - bg.lightness()) > 30 for c in far_right)  # the chevron is drawn there
