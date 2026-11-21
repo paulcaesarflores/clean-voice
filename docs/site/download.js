@@ -1,6 +1,7 @@
-/* Clean Voice's download page: picks the button for the visitor's computer and builds every GitHub link from the
-   page's own address, and the install commands. No libraries, no cookies, nothing is sent anywhere. Without this script
-   both computers' options show and the links and commands in the HTML (the fallback repo below) still work. Tested by tests/test_download_page.py. */
+/* Clean Voice's download page: builds every GitHub link and the install commands from the page's own address, wires the
+   Copy buttons, and names the call-app microphone and the screenshot for the visitor's computer. Both computers' install
+   steps always show. No libraries, no cookies, nothing is sent anywhere. Without this script the links and commands in the
+   HTML (the fallback repo below) still work. Tested by tests/test_download_page.py. */
 (function (root) {
   "use strict";
 
@@ -91,7 +92,7 @@
   }
 
   /* Sets every [data-link] address, every [data-command] text, every [data-cable] name, the [data-shot] screenshot and the page's data-os,
-     which the style sheet reads. */
+     which the style sheet reads (it shows the Copy buttons). */
   function apply(doc, nav, loc) {
     var os = detectOS(nav.userAgentData, nav.userAgent, nav.maxTouchPoints);
     var repo = repoFromLocation(loc.hostname, loc.pathname);
@@ -129,7 +130,7 @@
     }
   }
 
-  /* Wires the buttons (a real page only): Copy, and "Show the Mac/Windows options", which swaps the block shown. */
+  /* Wires the Copy buttons (a real page only). */
   function wire(doc, nav, loc) {
     var copy = function (button) {
       button.addEventListener("click", function () {
@@ -152,16 +153,6 @@
     };
     var copies = doc.querySelectorAll("[data-copy]");
     for (var i = 0; i < copies.length; i++) copy(copies[i]);
-    var show = function (link) {
-      link.addEventListener("click", function (event) {
-        event.preventDefault();
-        var os = link.getAttribute("data-show");
-        var data = { platform: os === "mac" ? "macOS" : "Windows", mobile: false };
-        apply(doc, { userAgentData: data, userAgent: "", maxTouchPoints: 0 }, loc);
-      });
-    };
-    var shows = doc.querySelectorAll("[data-show]");
-    for (var j = 0; j < shows.length; j++) show(shows[j]);
   }
 
   root.CleanVoiceDownload = {

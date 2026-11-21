@@ -139,33 +139,50 @@ h1 {
   font-size: 20px;
 }
 
-/* B019: two ways, the installer first and the command second. download.js sets data-os; without it both show. */
-.ways {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 28px;
+/* B019: Windows left, Mac right (stacked on a phone), each with Way 1 then Way 2 as numbered steps. */
+.lead {
+  margin: 0 0 24px;
+  font-size: 20px;
 }
 
-.os-block {
-  width: 100%;
-  max-width: 720px;
+.computers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
   text-align: left;
 }
 
-html[data-os="windows"] .os-block[data-os-target="mac"],
-html[data-os="mac"] .os-block[data-os-target="windows"] {
-  display: none;
+.computer {
+  min-width: 0;
+  padding: 22px 22px 24px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
 }
 
-.os-block + .os-block {
-  margin-top: 0;
+.computer h2 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--rule);
 }
 
-.way h2 {
+.os-icon {
+  flex: none;
+}
+
+.way + .way {
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid var(--rule);
+}
+
+.way h3 {
   margin-bottom: 12px;
-  font-size: 28px;
-  text-align: center;
+  font-size: 23px;
 }
 
 .note {
@@ -178,9 +195,10 @@ html[data-os="mac"] .os-block[data-os-target="windows"] {
   border-radius: 12px;
 }
 
-.note h3 {
+.note h4 {
+  font: 600 20px/1.15 var(--headline);
+  margin: 0;
   margin-bottom: 6px;
-  font-size: 20px;
 }
 
 .note p {
@@ -202,29 +220,8 @@ html[data-os="mac"] .os-block[data-os-target="windows"] {
   color: var(--warn-ink);
 }
 
-.note-warn h3 {
+.note-warn h4 {
   color: var(--warn-ink);
-}
-
-.divider {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin: 28px 0;
-  color: var(--muted);
-  font-size: 15px;
-}
-
-.divider::before,
-.divider::after {
-  content: "";
-  flex: 1;
-  border-top: 1px solid var(--rule);
-}
-
-.way .download {
-  margin: 0 auto;
-  max-width: 420px;
 }
 
 .command-box {
@@ -246,7 +243,7 @@ html[data-os="mac"] .os-block[data-os-target="windows"] {
   user-select: all;
 }
 
-/* The Copy button needs JavaScript, which sets data-os. */
+/* The Copy button needs JavaScript, which sets data-os (download.js). */
 .copy {
   display: none;
   flex: none;
@@ -273,26 +270,35 @@ html[data-os] .copy {
 }
 
 .install-steps {
-  margin: 18px 0 0;
-  padding-left: 28px;
+  margin: 0;
+  padding-left: 26px;
 }
 
 .install-steps li {
-  margin-bottom: 6px;
+  margin-bottom: 12px;
+  padding-left: 4px;
 }
 
-.retry {
-  margin: 12px 0 0;
+.install-steps li::marker {
   color: var(--muted);
-  font-size: 16px;
+  font-weight: 600;
+}
+
+.install-steps strong {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.install-steps .download,
+.install-steps .command-box {
+  margin-top: 10px;
 }
 
 .download {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-width: 280px;
-  padding: 16px 28px;
+  padding: 16px 24px;
   border-radius: 12px;
   background: var(--desk);
   color: var(--on-desk);
@@ -304,45 +310,12 @@ html[data-os] .copy {
 }
 
 .download .label {
-  font: 600 24px/1.2 var(--headline);
+  font: 600 26px/1.2 var(--headline);
 }
 
 .download .sub {
   font-size: 15px;
   opacity: 0.9;
-}
-
-/* Bigger when the visitor's computer is known (download.js sets data-os). */
-html[data-os="windows"] .download,
-html[data-os="mac"] .download {
-  min-width: 340px;
-  padding: 20px 40px;
-}
-
-html[data-os="windows"] .download .label,
-html[data-os="mac"] .download .label {
-  font-size: 30px;
-}
-
-.other-os,
-.any-os {
-  margin: 16px 0 0;
-  color: var(--muted);
-  font-size: 16px;
-}
-
-.other-os {
-  display: none;
-}
-
-html[data-os="windows"] .other-os[data-for="windows"],
-html[data-os="mac"] .other-os[data-for="mac"] {
-  display: block;
-}
-
-html[data-os="windows"] .any-os,
-html[data-os="mac"] .any-os {
-  display: none;
 }
 
 /* ---------------------------------------------------------------- the three steps */
@@ -470,21 +443,25 @@ footer {
     font-size: 18px;
   }
 
-  .download,
-  html[data-os="windows"] .download,
-  html[data-os="mac"] .download {
-    width: 100%;
-    min-width: 0;
-    padding: 16px 20px;
+  .lead {
+    font-size: 18px;
   }
 
-  .way h2 {
-    font-size: 24px;
+  .computers {
+    grid-template-columns: 1fr;
+  }
+
+  .computer {
+    padding: 18px 16px 20px;
+  }
+
+  .way h3 {
+    font-size: 22px;
   }
 
   .command {
     padding: 12px 14px;
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .copy {

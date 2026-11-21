@@ -285,8 +285,10 @@ def windows_check_install(version: str, expect_one: bool = True) -> None:
 def windows_uninstall() -> None:
     paths = windows_paths()
     command = str(windows_key_values()["UninstallString"])
-    print(f"run: cmd /c {command}", flush=True)
-    done = subprocess.run(["cmd", "/c", command], stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False)
+    # The string goes to CreateProcess unchanged, as Windows Settings runs it: a list through "cmd /c" had Python escape
+    # the quotes around the script path (run 44895364757: "Illegal characters in path").
+    print(f"run: {command}", flush=True)
+    done = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False)
     print(done.stdout, done.stderr, flush=True)
     leftovers = [str(paths[n]) for n in ("folder", "shortcut") if paths[n].exists()]
     if leftovers or windows_entries():

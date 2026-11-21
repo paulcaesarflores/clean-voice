@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import tomllib
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import cast
@@ -364,7 +365,7 @@ def test_nothing_loads_from_elsewhere(page: Page) -> None:
         assert (SITE / url).is_file(), url
 
 
-# ---- B019: the page offers two ways, the installer first and the command second -----------------------------------------
+# ---- B019: Windows and Mac side by side, each with two ways as numbered steps -----------------------------------------
 
 
 def test_the_commands_are_the_ones_the_app_runs(engine: QJSEngine) -> None:
@@ -381,49 +382,102 @@ def test_the_commands_are_the_ones_the_app_runs(engine: QJSEngine) -> None:
     assert call(engine, "CleanVoiceDownload.SCRIPTS") == {"windows": "install.ps1", "mac": "install.sh"}
 
 
-def test_without_javascript_both_ways_show_and_the_commands_are_right(engine: QJSEngine, page: Page) -> None:
+def test_without_javascript_both_computers_show_and_the_commands_are_right(engine: QJSEngine, page: Page) -> None:
     commands = call(engine, f"CleanVoiceDownload.commands({json.dumps(homepage_repo())})")
     assert isinstance(commands, dict)
     html = (SITE / "index.html").read_text(encoding="utf-8")
     for os_name, command in commands.items():
         assert f'<code class="command" data-command="{os_name}">{command}</code>' in html
-    blocks = [attrs for tag, attrs in page.tags if tag == "div" and attrs.get("data-os-target")]
-    assert {attrs["data-os-target"] for attrs in blocks} == {"windows", "mac"}
+    # Both panels are in the HTML itself: nothing hides one of them, and no link swaps them.
+    panels = [attrs for tag, attrs in page.tags if tag == "section" and attrs.get("data-os-target")]
+    assert [attrs["data-os-target"] for attrs in panels] == ["windows", "mac"]  # Windows first: on top on a phone
+    assert "data-show" not in html and "Show the Mac options" not in html and "Show the Windows" not in html
     copies = [attrs for tag, attrs in page.tags if tag == "button" and "data-copy" in attrs]
     assert {attrs["data-copy"] for attrs in copies} == {"windows", "mac"}
 
 
-def test_the_installer_comes_first_then_the_command_and_no_badge() -> None:
-    html = " ".join((SITE / "index.html").read_text(encoding="utf-8").split())
+def _page_text() -> str:
+    return " ".join((SITE / "index.html").read_text(encoding="utf-8").split())
+
+
+def _panel(html: str, os_name: str) -> str:
+    start = html.index(f'data-os-target="{os_name}"')
+    ends = [i for i in (html.find('data-os-target="', start + 1), html.find("</header>", start)) if i > start]
+    return html[start : min(ends)]
+
+
+def test_each_panel_has_way_1_then_way_2_and_no_badge() -> None:
+    html = _page_text()
     for os_name in ("windows", "mac"):
-        block = html[html.index(f'data-os-target="{os_name}"') :]
-        way1, way2 = block.index("Way 1: download the installer"), block.index("Way 2: install with one command")
-        assert (
-            way1 < block.index("Download for") < block.index('role="separator"') < way2 < block.index("data-command=")
-        )
+        panel = _panel(html, os_name)
+        way1, way2 = panel.index("Way 1: the installer"), panel.index("Way 2: one command")
+        assert way1 < panel.index("Download for") < way2 < panel.index("data-command=")
     assert "recommended" not in html.lower()
 
 
+def test_smart_app_control_note_comes_before_the_windows_download_button() -> None:
+    html = _page_text()
+    windows = _panel(html, "windows")
+    note = windows.index("First, turn off Smart App Control.")
+    assert windows.index('class="note note-warn"') <= note < windows.index("Click the <strong>Start</strong> button")
+    assert note < windows.index('class="download"')
+    assert "Download for Mac" not in windows
+    assert "Smart App Control" not in _panel(html, "mac")
+
+
+def _steps(panel: str, way: str) -> list[str]:
+    """The numbered steps of one way as plain text (tags dropped, spaces collapsed)."""
+    start = panel.index(f"{way}</h3>")
+    end = panel.find("<h3", start)
+    block = panel[start : end if end > 0 else len(panel)]
+    return [" ".join(_text(item).split()) for item in re.findall(r"<li>(.*?)</li>", block, re.DOTALL)]
+
+
+def _text(fragment: str) -> str:
+    return unescape(re.sub(r"<[^>]+>", "", re.sub(r"</?(span|a|div|button|code)[^>]*>", " ", fragment)))
+
+
+def test_the_steps_read_as_the_mockup_says() -> None:
+    html = _page_text()
+    windows, mac = _panel(html, "windows"), _panel(html, "mac")
+    base = "https://github.com/paulcaesarflores/clean-voice/releases/latest/download/"
+    assert _steps(windows, "Way 1: the installer") == [
+        "Click the Start button, type Smart App Control, and open it.",
+        "Choose Off. (Nothing found, or it's already off? Go to step 3. Windows 10 doesn't have it.)",
+        "Click Download for Windows (the button, right here). Download for Windows Windows 10 or 11",
+        "Open the file you downloaded and follow the installer.",
+        "If Windows says “Windows protected your PC”, click More info, then Run anyway.",
+    ]
+    assert _steps(windows, "Way 2: one command") == [
+        f"Click Copy. irm {base}install.ps1 | iex Copy",
+        "Right-click the Start button and choose Terminal.",
+        "Press Ctrl+V, then Enter.",
+        "Wait about 10 minutes. Clean Voice opens by itself. If it stops, do it again.",
+    ]
+    assert _steps(mac, "Way 1: the installer") == [
+        "Click Download for Mac (the button, right here). Download for Mac macOS 13 or later, Apple Silicon and Intel",
+        "Open the file you downloaded and drag Clean Voice into Applications.",
+        (
+            "Open Clean Voice. If your Mac says it can't open it: System Settings → Privacy & Security, "
+            "scroll down, click Open Anyway."
+        ),
+    ]
+    assert _steps(mac, "Way 2: one command") == [
+        f"Click Copy. curl -fsSL {base}install.sh | bash Copy",
+        "Open Terminal: press Cmd+Space, type Terminal, press Return.",
+        "Press Cmd+V, then Return.",
+        "If your Mac asks to install developer tools, click Install.",
+        "Wait about 10 minutes. Clean Voice opens by itself. If it stops, do it again.",
+    ]
+
+
 def test_the_mockup_texts_are_on_the_page() -> None:
-    html = " ".join((SITE / "index.html").read_text(encoding="utf-8").split())
+    html = _page_text()
     for text in (
-        "First, turn off Smart App Control",
+        "Find your computer below. Pick Way 1 or Way 2. Both give you the same app.",
         "Clean Voice is safe, free, and its code is public. Windows blocks it only because it isn't signed.",
         "Signing costs a monthly fee to Microsoft, which this free app doesn't pay.",
-        "Open Start, then Windows Security, then App and browser control, then Smart App Control settings, and choose Off.",
-        "Download for Windows",
-        "Windows 10 or 11",
-        "Click Copy.",
-        "Right-click the Start button and choose Terminal.",
-        "Paste with Ctrl+V and press Enter. It takes about 10 minutes, then Clean Voice opens.",
-        "If it stops, run the same command again.",
-        "On a Mac? <a",
-        "Show the Mac options",
-        "Download for Mac",
-        "Open System Settings → Privacy &amp; Security, scroll down and click <em>Open Anyway</em>.",
-        "Applications → Utilities → Terminal",
-        "Paste with Cmd+V and press Enter.",
-        "Install Clean Voice one of the two ways above",
+        "Install Clean Voice (above), then open it and pick your microphone.",
     ):
         assert text in html, text
     # B019-4: "Windows or Mac warns you?" stays until a real PC run shows no warning, unchanged.
@@ -432,6 +486,14 @@ def test_the_mockup_texts_are_on_the_page() -> None:
     # B019-7 (ledger decision): what the command downloads is a Note for the orchestrator, not guest-facing jargon.
     assert "PyPI" not in html
     assert "MinGit" not in html
+
+
+def test_the_panels_stack_on_a_phone_and_sit_side_by_side_otherwise() -> None:
+    css = (SITE / "style.css").read_text(encoding="utf-8")
+    assert re.search(r"\.computers \{[^}]*grid-template-columns: 1fr 1fr;", css)
+    phone = css[css.index("@media (max-width: 600px)") :]
+    assert re.search(r"\.computers \{[^}]*grid-template-columns: 1fr;", phone)
+    assert "os-block" not in css and "other-os" not in css  # the one-computer swap is gone
 
 
 def test_apply_fills_each_command_from_the_pages_own_address(engine: QJSEngine) -> None:
@@ -449,9 +511,6 @@ def test_apply_fills_each_command_from_the_pages_own_address(engine: QJSEngine) 
         "irm https://github.com/someone/clean-voice/releases/latest/download/install.ps1 | iex",
         "curl -fsSL https://github.com/someone/clean-voice/releases/latest/download/install.sh | bash",
     ]
-    css = (SITE / "style.css").read_text(encoding="utf-8")
-    assert 'html[data-os="windows"] .os-block[data-os-target="mac"]' in css
-    assert 'html[data-os="mac"] .os-block[data-os-target="windows"]' in css
 
 
 def test_copy_puts_the_command_on_the_clipboard(engine: QJSEngine) -> None:

@@ -187,6 +187,30 @@ def test_the_local_command_is_the_guests_command_with_another_base(install_smoke
         assert local.replace("http://127.0.0.1:1234", real_base) == updates.install_command_text(repo, app_platform)
 
 
+def test_the_registered_uninstall_string_runs_unchanged(
+    install_smoke: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # CI run 44895364757: a list through "cmd /c" made Python escape the quotes around the script path, and PowerShell
+    # said "Illegal characters in path". Windows Settings hands the registered string to CreateProcess as it is.
+    registered = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\\Users\\a b\\Clean Voice\\Uninstall.ps1"'
+    seen: list[object] = []
+
+    def fake_run(command: object, **_: object) -> subprocess.CompletedProcess[str]:
+        seen.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")  # type: ignore[arg-type]
+
+    gone = Path("does-not-exist")
+    monkeypatch.setattr(install_smoke, "windows_paths", lambda: {"folder": gone, "shortcut": gone})
+    monkeypatch.setattr(install_smoke, "windows_key_values", lambda: {"UninstallString": registered})
+    monkeypatch.setattr(install_smoke, "windows_entries", list)
+    monkeypatch.setattr(install_smoke.subprocess, "run", fake_run)
+    install_smoke.windows_uninstall()
+    assert seen == [registered]
+    # and install.ps1 registers exactly that shape: powershell, then -File with the quoted script path
+    script = (ROOT / "tools" / "install" / "install.ps1").read_text(encoding="utf-8")
+    assert "'powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"' + $script + '\"'" in script
+
+
 def test_the_command_runs_with_no_python_and_no_git_on_path(install_smoke: ModuleType) -> None:
     env = install_smoke.stripped_env(
         "windows", "http://127.0.0.1:1", {"Path": r"C:\Python312;C:\Git\cmd", "CLEAN_VOICE_UPDATE": "1", "TEMP": "x"}

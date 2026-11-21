@@ -35,40 +35,57 @@ That's it. If Clean Voice's headline says **"Your call hears your clean voice"**
 
 ## Install Clean Voice
 
-There are two ways. Both give you the same app.
+Find your computer below. Pick **Way 1** or **Way 2**. Both give you the same app.
 
-### Way 1: download the installer
+### Windows
+
+**Way 1: the installer**
 
 > [!IMPORTANT]
-> **On Windows, first turn off Smart App Control.** Clean Voice is safe, free, and its code is public, right here.
-> Windows blocks it only because it isn't signed. Signing costs a monthly fee to Microsoft, which this free app
-> doesn't pay.
->
-> Open **Start → Windows Security → App & browser control → Smart App Control settings** and choose **Off**.
+> **First, turn off Smart App Control.** Clean Voice is safe, free, and its code is public, right here. Windows
+> blocks it only because it isn't signed. Signing costs a monthly fee to Microsoft, which this free app doesn't pay.
 
-Then download the installer for your computer with the buttons at the top of this page, open it and follow its steps.
-Your computer may warn you the first time you open Clean Voice: see [the first-launch warning](#the-first-launch-warning).
+1. Click the **Start** button, type **Smart App Control**, and open it.
+2. Choose **Off**. (Nothing found, or it's already off? Go to step 3. Windows 10 doesn't have it.)
+3. Click [**Download for Windows**](https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-Windows.msi).
+4. Open the file you downloaded and follow the installer.
+5. If Windows says "Windows protected your PC", click **More info**, then **Run anyway**.
 
-### Way 2: install with one command
+**Way 2: one command**
 
-This builds Clean Voice on your own computer. It takes about 10 minutes. If it stops, run the same command again.
+1. Copy this line:
 
-**Windows:** right-click the **Start** button and choose **Terminal**. Paste this and press **Enter**:
+   ```powershell
+   irm https://github.com/paulcaesarflores/clean-voice/releases/latest/download/install.ps1 | iex
+   ```
 
-```powershell
-irm https://github.com/paulcaesarflores/clean-voice/releases/latest/download/install.ps1 | iex
-```
+2. Right-click the **Start** button and choose **Terminal**.
+3. Press **Ctrl+V**, then **Enter**.
+4. Wait about 10 minutes. Clean Voice opens by itself. If it stops, do it again.
 
-**Mac:** open **Terminal** (Applications → Utilities). Paste this and press **Return**:
+### Mac
 
-```bash
-curl -fsSL https://github.com/paulcaesarflores/clean-voice/releases/latest/download/install.sh | bash
-```
+**Way 1: the installer**
 
-A Mac without Apple's developer tools asks to install them first: click **Install**, and the command carries on when
-they're done.
+1. Click [**Download for Mac**](https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-macOS.dmg).
+2. Open the file you downloaded and drag **Clean Voice** into **Applications**.
+3. Open Clean Voice. If your Mac says it can't open it: **System Settings → Privacy & Security**, scroll down,
+   click **Open Anyway**.
 
-Clean Voice opens when it's ready. To remove it on Windows, use **Settings → Apps → Installed apps**, as for any app.
+**Way 2: one command**
+
+1. Copy this line:
+
+   ```bash
+   curl -fsSL https://github.com/paulcaesarflores/clean-voice/releases/latest/download/install.sh | bash
+   ```
+
+2. Open **Terminal**: press **Cmd+Space**, type **Terminal**, press **Return**.
+3. Press **Cmd+V**, then **Return**.
+4. If your Mac asks to install developer tools, click **Install**.
+5. Wait about 10 minutes. Clean Voice opens by itself. If it stops, do it again.
+
+To remove Clean Voice on Windows, use **Settings → Apps → Installed apps**, as for any app.
 
 ## What it does
 
@@ -107,7 +124,7 @@ Clean Voice is free and isn't signed with a paid certificate, so your computer w
 This is expected:
 
 - **Windows Smart App Control:** if Windows blocks Clean Voice, turn Smart App Control off as in
-  [Way 1](#way-1-download-the-installer). It blocks every unsigned app, however it was installed.
+  [Windows, Way 1](#windows). It blocks every unsigned app, however it was installed.
 - **Windows:** if you see "Windows protected your PC", click **More info**, then **Run anyway**.
 - **Mac:** if you see "Clean Voice can't be opened", open **System Settings → Privacy & Security**, scroll down
   and click **Open Anyway**.

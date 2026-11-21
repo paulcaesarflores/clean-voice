@@ -31,79 +31,90 @@
       <p class="tagline">Sound clear on your podcast. Clean Voice is a free app that cleans up your microphone, so the
         host hears your voice, not your room.</p>
 
-      <!-- B019: two ways to install, the installer first and the command second (neither is marked as the better one).
-           download.js shows the block for the visitor's computer (data-os) and builds each link and command from the
-           page's own address; without JavaScript both blocks are shown, as written here (the fallback repo). -->
-      <div class="ways">
-        <div class="os-block" data-os-target="windows">
+      <!-- B019 (docs/ui/mockups/B019-download-page.md): both computers always show, Windows left and Mac right (stacked
+           on a phone), each with Way 1 (the installer) then Way 2 (one command), as numbered steps. download.js builds
+           each link and command from the page's own address; without JavaScript the HTML's own (the fallback repo) work. -->
+      <p class="lead">Find your computer below. Pick Way 1 or Way 2. Both give you the same app.</p>
+      <div class="computers">
+        <section class="computer" data-os-target="windows" aria-labelledby="os-windows">
+          <h2 id="os-windows">
+            <svg class="os-icon" viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path fill="currentColor" d="M2 4.6 10.4 3.4v7.4H2V4.6Zm9.6-1.4L22 1.8v9H11.6V3.2ZM2 12.2h8.4v7.4L2 18.4v-6.2Zm9.6 0H22v9l-10.4-1.4v-7.6Z"/></svg>
+            Windows
+          </h2>
           <section class="way" aria-labelledby="way1-windows">
-            <h2 id="way1-windows">Way 1: download the installer</h2>
+            <h3 id="way1-windows">Way 1: the installer</h3>
             <div class="note note-warn">
               <svg class="note-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M12 2.5 1.8 20.5h20.4L12 2.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 9.5v5.2M12 17.6v.1" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
               <div>
-                <h3>First, turn off Smart App Control</h3>
+                <h4>First, turn off Smart App Control.</h4>
                 <p>Clean Voice is safe, free, and its code is public. Windows blocks it only because it isn't signed.
                   Signing costs a monthly fee to Microsoft, which this free app doesn't pay.</p>
-                <p>Open Start, then Windows Security, then App and browser control, then Smart App Control settings,
-                  and choose Off. If Windows shows “Windows protected your PC”, click <em>More info</em>, then
-                  <em>Run anyway</em>.</p>
               </div>
             </div>
-            <a class="download" data-link="windows" href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-Windows.msi">
-              <span class="label">Download for Windows</span>
-              <span class="sub">Windows 10 or 11</span>
-            </a>
+            <ol class="install-steps">
+              <li>Click the <strong>Start</strong> button, type <strong>Smart App Control</strong>, and open it.</li>
+              <li>Choose <strong>Off</strong>. (Nothing found, or it's already off? Go to step 3. Windows 10 doesn't have it.)</li>
+              <li>Click <strong>Download for Windows</strong> (the button, right here).
+                <a class="download" data-link="windows" href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-Windows.msi">
+                  <span class="label">Download for Windows</span>
+                  <span class="sub">Windows 10 or 11</span>
+                </a>
+              </li>
+              <li>Open the file you downloaded and follow the installer.</li>
+              <li>If Windows says “Windows protected your PC”, click <strong>More info</strong>, then <strong>Run anyway</strong>.</li>
+            </ol>
           </section>
-          <p class="divider" role="separator"><span>or</span></p>
           <section class="way" aria-labelledby="way2-windows">
-            <h2 id="way2-windows">Way 2: install with one command</h2>
-            <div class="command-box">
-              <code class="command" data-command="windows">irm https://github.com/paulcaesarflores/clean-voice/releases/latest/download/install.ps1 | iex</code>
-              <button class="copy" type="button" data-copy="windows">Copy</button>
-            </div>
+            <h3 id="way2-windows">Way 2: one command</h3>
             <ol class="install-steps">
-              <li>Click Copy.</li>
-              <li>Right-click the Start button and choose Terminal.</li>
-              <li>Paste with Ctrl+V and press Enter. It takes about 10 minutes, then Clean Voice opens.</li>
+              <li>Click <strong>Copy</strong>.
+                <div class="command-box">
+                  <code class="command" data-command="windows">irm https://github.com/paulcaesarflores/clean-voice/releases/latest/download/install.ps1 | iex</code>
+                  <button class="copy" type="button" data-copy="windows">Copy</button>
+                </div>
+              </li>
+              <li>Right-click the <strong>Start</strong> button and choose <strong>Terminal</strong>.</li>
+              <li>Press <strong>Ctrl+V</strong>, then <strong>Enter</strong>.</li>
+              <li>Wait about 10 minutes. Clean Voice opens by itself. If it stops, do it again.</li>
             </ol>
-            <p class="retry">If it stops, run the same command again.</p>
           </section>
-        </div>
-        <div class="os-block" data-os-target="mac">
+        </section>
+
+        <section class="computer" data-os-target="mac" aria-labelledby="os-mac">
+          <h2 id="os-mac">
+            <svg class="os-icon" viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M1.5 19.5h21" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+            Mac
+          </h2>
           <section class="way" aria-labelledby="way1-mac">
-            <h2 id="way1-mac">Way 1: download the installer</h2>
-            <div class="note">
-              <div>
-                <h3>If your Mac says it can't open Clean Voice</h3>
-                <p>Clean Voice is free and not signed with a paid certificate. Open System Settings → Privacy &amp;
-                  Security, scroll down and click <em>Open Anyway</em>.</p>
-              </div>
-            </div>
-            <a class="download" data-link="mac" href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-macOS.dmg">
-              <span class="label">Download for Mac</span>
-              <span class="sub">macOS 13 or later, Apple Silicon and Intel</span>
-            </a>
-          </section>
-          <p class="divider" role="separator"><span>or</span></p>
-          <section class="way" aria-labelledby="way2-mac">
-            <h2 id="way2-mac">Way 2: install with one command</h2>
-            <div class="command-box">
-              <code class="command" data-command="mac">curl -fsSL https://github.com/paulcaesarflores/clean-voice/releases/latest/download/install.sh | bash</code>
-              <button class="copy" type="button" data-copy="mac">Copy</button>
-            </div>
+            <h3 id="way1-mac">Way 1: the installer</h3>
             <ol class="install-steps">
-              <li>Click Copy.</li>
-              <li>Open Terminal: Applications → Utilities → Terminal.</li>
-              <li>Paste with Cmd+V and press Enter. It takes about 10 minutes, then Clean Voice opens.</li>
+              <li>Click <strong>Download for Mac</strong> (the button, right here).
+                <a class="download" data-link="mac" href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-macOS.dmg">
+                  <span class="label">Download for Mac</span>
+                  <span class="sub">macOS 13 or later, Apple Silicon and Intel</span>
+                </a>
+              </li>
+              <li>Open the file you downloaded and drag <strong>Clean Voice</strong> into <strong>Applications</strong>.</li>
+              <li>Open Clean Voice. If your Mac says it can't open it: <strong>System Settings → Privacy &amp; Security</strong>, scroll down, click <strong>Open Anyway</strong>.</li>
             </ol>
-            <p class="retry">If it stops, run the same command again.</p>
           </section>
-        </div>
+          <section class="way" aria-labelledby="way2-mac">
+            <h3 id="way2-mac">Way 2: one command</h3>
+            <ol class="install-steps">
+              <li>Click <strong>Copy</strong>.
+                <div class="command-box">
+                  <code class="command" data-command="mac">curl -fsSL https://github.com/paulcaesarflores/clean-voice/releases/latest/download/install.sh | bash</code>
+                  <button class="copy" type="button" data-copy="mac">Copy</button>
+                </div>
+              </li>
+              <li>Open <strong>Terminal</strong>: press <strong>Cmd+Space</strong>, type <strong>Terminal</strong>, press <strong>Return</strong>.</li>
+              <li>Press <strong>Cmd+V</strong>, then <strong>Return</strong>.</li>
+              <li>If your Mac asks to install developer tools, click <strong>Install</strong>.</li>
+              <li>Wait about 10 minutes. Clean Voice opens by itself. If it stops, do it again.</li>
+            </ol>
+          </section>
+        </section>
       </div>
-      <p class="other-os" data-for="windows">On a Mac? <a href="#way1-mac" data-show="mac">Show the Mac options</a></p>
-      <p class="other-os" data-for="mac">On Windows? <a href="#way1-windows" data-show="windows">Show the Windows
-        options</a></p>
-      <p class="any-os">Clean Voice runs on Windows and Mac computers.</p>
     </header>
 
     <section class="setup" aria-labelledby="setup-title">
@@ -115,9 +126,8 @@
             <a href="https://vb-audio.com/Cable/">Get VB-CABLE from vb-audio.com</a></p>
         </li>
         <li>
-          <h3>Install and open Clean Voice</h3>
-          <p>Install Clean Voice one of the two ways above: the installer, or the command. Then open it and pick
-            your microphone.</p>
+          <h3>Install Clean Voice</h3>
+          <p>Install Clean Voice (above), then open it and pick your microphone.</p>
         </li>
         <li id="step-cable">
           <!-- download.js names the one for the visitor's computer (data-cable). -->
