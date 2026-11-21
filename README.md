@@ -59,7 +59,7 @@ Find your computer below. Pick **Way 1** or **Way 2**. Both give you the same ap
    irm https://github.com/paulcaesarflores/clean-voice/releases/latest/download/install.ps1 | iex
    ```
 
-2. Right-click the **Start** button and choose **Terminal**.
+2. Right-click the **Start** button and choose **Terminal** (on Windows 10: **Windows PowerShell**).
 3. Press **Ctrl+V**, then **Enter**.
 4. Wait about 10 minutes. Clean Voice opens by itself. If it stops, do it again.
 

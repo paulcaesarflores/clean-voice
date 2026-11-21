@@ -520,7 +520,7 @@ def test_a_per_user_msi_is_removed_directly_and_a_per_machine_one_through_the_ad
     out = ps(swap_scenario(setup=f"Add-Msi 'User' '{GUID_U}'; Add-Msi 'Machine' '{GUID_M}'; $global:Exit = 3010"))
     calls = lines_with(out, "CALL|")
     assert len(calls) == 2
-    assert calls[0].startswith(f"CALL|/x {GUID_U} /qn /l*v ")
+    assert calls[0].startswith(f"CALL|/x {GUID_U} /qn|")
     assert "|verb=|wait=True|" in calls[0]
     assert calls[1].startswith(f"CALL|/x {GUID_M} /qn|verb=RunAs|wait=True|")  # exit 3010 (restart needed) succeeds
     assert "SWAP|ok|machineRemoved=True" in out
@@ -578,7 +578,7 @@ def test_a_per_user_product_registered_under_hklm_is_removed_before_the_move(ps)
         + "\n(Find-CvOldMsi $cx).User -join ','\n(Find-CvOldMsi $cx).Machine.Count"
     )
     (call,) = lines_with(out, "CALL|")
-    assert call.startswith(f"CALL|/x {GUID_M} /qn /l*v ") and "|verb=|" in call
+    assert call.startswith(f"CALL|/x {GUID_M} /qn|verb=|") and "|verb=RunAs|" not in call
     assert call.endswith("|folder=none|old=old")
     assert "SWAP|ok|machineRemoved=False" in out
     assert state(out)["folder"] == "new"

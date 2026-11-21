@@ -203,6 +203,8 @@ jobs:
           .venv/Scripts/python -m pip install -e . --group dev
       - name: Install by command, launch, run again, uninstall
         run: .venv/Scripts/python tools/ci/smoke_install.py windows
+      - name: Install update on the running app (the script in update mode)
+        run: .venv/Scripts/python tools/ci/smoke_install.py windows --update
       - name: Replace an old all-users MSI (v0.2.0)
         run: .venv/Scripts/python tools/ci/smoke_install.py windows --from-old machine
       - name: Replace an old per-user MSI (v0.2.0)
@@ -212,7 +214,6 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/install-log"
           cp "$TEMP/clean-voice-install.log" "$RUNNER_TEMP/install-log/" || true
-          cp "$TEMP/clean-voice-install-msi.log" "$RUNNER_TEMP/install-log/" || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
@@ -254,6 +255,8 @@ jobs:
           codesign --verify --strict --verbose=2 "$RUNNER_TEMP/librnnoise.dylib"
       - name: Install by command, check, run again
         run: .venv/bin/python tools/ci/smoke_install.py macos --arch ${{ matrix.arch }}
+      - name: Install update on the running app (the script in update mode)
+        run: .venv/bin/python tools/ci/smoke_install.py macos --arch ${{ matrix.arch }} --update
       - name: Replace an old Applications copy (v0.2.0 DMG)
         run: .venv/bin/python tools/ci/smoke_install.py macos --arch ${{ matrix.arch }} --from-old machine
       - name: Collect the install log

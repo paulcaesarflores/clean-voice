@@ -313,6 +313,7 @@ class LaunchSpec:
     env: dict[str, str] | None
     creationflags: int
     script: Path | None  # the Mac's .command file (None on Windows)
+    cwd: Path | None = None  # Windows: the child's working directory, outside the install folder (B019-15)
 
 
 def powershell_exe() -> Path:
@@ -340,7 +341,10 @@ def launch_spec(repo: str, platform: str, pid: int, folder: Path) -> LaunchSpec:
     variables = update_env(pid, status)
     if platform == "win32":
         argv = [str(powershell_exe()), "-NoProfile", "-Command", command]
-        return LaunchSpec(argv, {**os.environ, **variables}, CREATE_NEW_CONSOLE, None)
+        # The child would inherit the app's working directory, which a Start menu launch sets to the install folder; Windows
+        # refuses to rename a folder that is a process's working directory, so the swap would fail. The attempt's own
+        # folder is outside it. (A Mac's Terminal starts in the home folder: nothing to do there.)
+        return LaunchSpec(argv, {**os.environ, **variables}, CREATE_NEW_CONSOLE, None, folder)
     script = folder / "Clean Voice Update.command"
     lines = ["#!/bin/bash", *(f"export {k}={shlex.quote(v)}" for k, v in variables.items()), command, ""]
     script.write_text("\n".join(lines), encoding="utf-8")
@@ -352,7 +356,9 @@ def start_terminal(spec: LaunchSpec) -> subprocess.Popen[bytes] | None:
     """Start the terminal. Windows: the new console's process, which the app watches. A Mac: ``open`` returns at once,
     so a non-zero exit is the failure; there is no process to watch."""
     if spec.script is None:
-        return subprocess.Popen(spec.argv, env=spec.env, creationflags=spec.creationflags)  # an argument list, no shell
+        return subprocess.Popen(
+            spec.argv, env=spec.env, creationflags=spec.creationflags, cwd=spec.cwd
+        )  # an argument list, no shell
     done = subprocess.run(spec.argv, check=False)
     if done.returncode != 0:
         raise OSError(f"open exited {done.returncode}")

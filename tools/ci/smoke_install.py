@@ -1,6 +1,6 @@
 """CI's end-to-end check of the install command (B019). Standard library only; run from the project folder.
 
-    smoke_install.py windows|macos [--arch arm64|x86_64] [--from-old machine|user]
+    smoke_install.py windows|macos [--arch arm64|x86_64] [--from-old machine|user | --update]
 
 It builds the release folder exactly as the release workflow does (``git archive HEAD`` -> ``release_assets.py``), serves
 it from a local HTTP server that answers every file as ``application/octet-stream`` (as GitHub does), then runs the guest's
@@ -9,7 +9,10 @@ real command with a stripped PATH (no Python, no git): Windows PowerShell 5.1 ``
 command a second time (one install, one entry, still launches) and, on Windows, removes it with the registered
 UninstallString. ``--from-old`` first installs v0.2.0's real MSI (Windows; ``machine`` = all users, ``user`` = this user) or
 DMG (Mac) from the public release, writes a prefs file and a "Start with Windows" value, runs the command and checks that
-one Clean Voice is left, the prefs are untouched and the Run value points at an exe that exists.
+one Clean Voice is left, the prefs are untouched and the Run value points at an exe that exists. ``--update`` instead
+starts the installed app and runs the script in update mode against its pid, as Install update does (B019-15): the app
+must stay open until the script writes ``swap``, the new tree must replace the old one, the app must be opened again and
+the status file must still say ``swap``.
 
 Exit code 0 means every check passed; 1 means a check failed (the reason is printed).
 """
@@ -17,6 +20,7 @@ Exit code 0 means every check passed; 1 means a check failed (the reason is prin
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import http.server
 import importlib.util
@@ -477,10 +481,135 @@ def mac_from_old(base: str, work: Path, arch: str | None) -> None:
     print("from-old: PASS", flush=True)
 
 
+# ------------------------------------------------------------------ Install update's real run (B019-15)
+
+
+def parse_tasklist_pids(text: str) -> set[int]:
+    """The process ids in ``tasklist /FO CSV /NH`` output for Clean Voice's exe."""
+    pids = set()
+    for row in csv.reader(text.splitlines()):
+        if len(row) >= 2 and row[0] == EXE_NAME and row[1].isdigit():
+            pids.add(int(row[1]))
+    return pids
+
+
+def app_pids(platform: str) -> set[int]:
+    """The running Clean Voice processes, found the way the scripts find them (Get-Process / pgrep -x)."""
+    if platform == "windows":
+        done = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {EXE_NAME}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return parse_tasklist_pids(done.stdout)
+    done = subprocess.run(["pgrep", "-x", "Clean Voice"], capture_output=True, text=True, check=False)
+    return {int(word) for word in done.stdout.split() if word.isdigit()}
+
+
+def stop_apps(platform: str) -> None:
+    """Close every Clean Voice (the reopened one) so the next check and the uninstall find none running."""
+    if platform == "windows":
+        subprocess.run(["taskkill", "/F", "/T", "/IM", EXE_NAME], capture_output=True, check=False)
+    else:
+        subprocess.run(["pkill", "-x", "Clean Voice"], capture_output=True, check=False)
+    deadline = time.monotonic() + 30
+    while app_pids(platform) and time.monotonic() < deadline:
+        time.sleep(0.5)
+
+
+def update_problems(status: str, sentinel_left: bool, old_left: bool, reopened: bool) -> list[str]:
+    """What is wrong after an update run (an empty list when it is right): the script leaves the one word ``swap``
+    (it writes ``failed`` when anything goes wrong), the old tree is gone with its ``.old`` copy, the app is open again."""
+    problems = []
+    if status != "swap":
+        problems.append(f"the status file says {status!r}, expected 'swap'")
+    if sentinel_left:
+        problems.append("the old tree's marker file is still there: the new tree was not swapped in")
+    if old_left:
+        problems.append("the .old copy was not removed")
+    if not reopened:
+        problems.append("the app was not opened again")
+    return problems
+
+
+def run_update(platform: str, base: str, work: Path, version: str, arch: str | None) -> None:
+    """The script in update mode against a live app, set up as ``clean_voice.updates.launch_spec`` sets it up (its
+    variables and, on Windows, its working directory), the app's role in the handshake played here: the app stays
+    open until the script writes ``swap``, then quits (``UpdateController.poll`` does that in the real app)."""
+    from clean_voice import updates
+
+    if platform == "windows":
+        paths = windows_paths()
+        tree, exe, app_cwd = paths["folder"], paths["exe"], paths["folder"]  # a Start menu launch: cwd = install folder
+    else:
+        tree = mac_installed()
+        exe, app_cwd = tree / "Contents" / "MacOS" / "Clean Voice", Path("/")  # a Finder launch: cwd is /
+    sentinel = tree / "old-tree-marker.txt"
+    sentinel.write_text("this file is in the old tree only\n", encoding="ascii")
+    old = Path(str(tree) + ".old")
+    status_dir = updates.fresh_folder()
+    status_file = status_dir / "status"
+
+    app = subprocess.Popen([str(exe)], cwd=app_cwd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    print(f"the live app: pid {app.pid}", flush=True)
+    try:
+        before = app_pids(platform) | {app.pid}
+        env = {**stripped_env(platform, base, os.environ), **updates.update_env(app.pid, status_file)}
+        cwd = updates.launch_spec(REPO, "win32", app.pid, status_dir).cwd if platform == "windows" else None
+        log = work / "update.log"
+        argv = command_argv(platform, base)
+        print(f"run (update mode, cwd {cwd}): {argv}", flush=True)
+        with log.open("w", encoding="utf-8") as out:
+            script = subprocess.Popen(
+                argv, env=env, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT
+            )
+            deadline = time.monotonic() + RUN_TIMEOUT_S
+            quit_for_swap = False
+            while script.poll() is None:
+                if time.monotonic() > deadline:
+                    script.kill()
+                    raise SmokeError("the update run did not finish in time")
+                if not quit_for_swap:
+                    if updates.read_status(status_dir) == updates.STATUS_SWAP:
+                        if app.poll() is not None:
+                            raise SmokeError("the app was already gone when the script asked it to quit")
+                        app.terminate()  # the app's quit, on 'swap'; wait() reaps it so the pid is truly gone
+                        app.wait(timeout=60)
+                        quit_for_swap = True
+                    elif app.poll() is not None:
+                        raise SmokeError(f"the app quit before the swap (exit {app.returncode})")
+                time.sleep(0.2)
+        print(f"{log.read_text(encoding='utf-8', errors='replace')}\nexit code {script.returncode}", flush=True)
+        if not quit_for_swap:
+            raise SmokeError("the script never asked the app to quit")
+        reopened = False
+        reopen_deadline = time.monotonic() + 60
+        while not reopened and time.monotonic() < reopen_deadline:
+            reopened = bool(app_pids(platform) - before)
+            if not reopened:
+                time.sleep(0.5)
+        problems = update_problems(updates.read_status(status_dir), sentinel.exists(), old.exists(), reopened)
+        if problems:
+            if platform == "windows":
+                windows_dump_installer_events(time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - 3600)))
+            raise SmokeError("after the update: " + "; ".join(problems))
+    finally:
+        if app.poll() is None:
+            app.kill()
+        stop_apps(platform)
+        shutil.rmtree(status_dir, ignore_errors=True)
+    if platform == "windows":
+        windows_check_install(version)
+    else:
+        mac_check_install(arch)
+    print("update: PASS", flush=True)
+
+
 # ------------------------------------------------------------------ the run
 
 
-def smoke(platform: str, arch: str | None, from_old: str | None) -> None:
+def smoke(platform: str, arch: str | None, from_old: str | None, update: bool = False) -> None:
     work = Path(tempfile.mkdtemp(prefix="clean-voice-smoke-"))
     release = work / "release"
     try:
@@ -499,12 +628,16 @@ def smoke(platform: str, arch: str | None, from_old: str | None) -> None:
                     windows_check_install(version)
                 else:
                     mac_check_install(arch)
-            run_command(platform, base, work / "install-again.log")  # a second run: one install, still launches
-            if platform == "windows":
-                windows_check_install(version)
-                windows_uninstall()
+            if update:
+                run_update(platform, base, work, version, arch)
             else:
-                mac_check_install(arch)
+                run_command(platform, base, work / "install-again.log")  # a second run: one install, still launches
+                if platform == "windows":
+                    windows_check_install(version)
+                else:
+                    mac_check_install(arch)
+            if platform == "windows":
+                windows_uninstall()
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -518,9 +651,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--from-old", choices=("machine", "user"), help="first install v0.2.0's MSI (Windows) or DMG (Mac)"
     )
+    parser.add_argument(
+        "--update",
+        action="store_true",
+        help="after the install, start the app and run the script in update mode against it, as Install update does",
+    )
     args = parser.parse_args(argv)
+    if args.update and args.from_old:
+        parser.error("--update and --from-old are separate runs")
     try:
-        smoke(args.platform, args.arch, args.from_old)
+        smoke(args.platform, args.arch, args.from_old, args.update)
     except (SmokeError, subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr, flush=True)
         return 1

@@ -273,6 +273,7 @@ def test_macos_checks_app_nap_is_disabled_in_the_built_info_plist(jobs: dict[str
             ".venv/Scripts/python",
             [
                 "tools/ci/smoke_install.py windows\n",
+                "tools/ci/smoke_install.py windows --update",
                 "tools/ci/smoke_install.py windows --from-old machine",
                 "tools/ci/smoke_install.py windows --from-old user",
             ],
@@ -282,6 +283,7 @@ def test_macos_checks_app_nap_is_disabled_in_the_built_info_plist(jobs: dict[str
             ".venv/bin/python",
             [
                 "tools/ci/smoke_install.py macos --arch ${{ matrix.arch }}\n",
+                "tools/ci/smoke_install.py macos --arch ${{ matrix.arch }} --update",
                 "tools/ci/smoke_install.py macos --arch ${{ matrix.arch }} --from-old machine",
             ],
         ),

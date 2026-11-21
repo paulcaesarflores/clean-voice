@@ -283,6 +283,22 @@ def test_old_copy_problem_ignores_identical_stub_exes(install_smoke: ModuleType,
     assert install_smoke.old_copy_problem(new, new) is None  # per-user: the same path is replaced in place
 
 
+def test_update_run_judgement(install_smoke: ModuleType) -> None:
+    assert install_smoke.update_problems("swap", False, False, True) == []
+    problems = " ".join(install_smoke.update_problems("failed", True, True, False))
+    for part in ("'failed'", "not swapped in", ".old copy", "not opened again"):
+        assert part in problems, part
+
+
+def test_the_running_apps_are_read_from_tasklist(install_smoke: ModuleType) -> None:
+    text = '"Clean Voice.exe","4120","Console","1","60,000 K"\n"Clean Voice.exe","77","Console","1","9 K"\n'
+    assert install_smoke.parse_tasklist_pids(text) == {4120, 77}
+    assert (
+        install_smoke.parse_tasklist_pids("INFO: No tasks are running which match the specified criteria.\n") == set()
+    )
+    assert install_smoke.parse_tasklist_pids('"Other.exe","5","Console","1","1 K"\n') == set()
+
+
 def test_the_release_folder_is_built_from_git_archive(install_smoke: ModuleType, tmp_path: Path) -> None:
     import shutil
     import subprocess

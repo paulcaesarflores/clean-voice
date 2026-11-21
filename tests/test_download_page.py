@@ -450,7 +450,7 @@ def test_the_steps_read_as_the_mockup_says() -> None:
     ]
     assert _steps(windows, "Way 2: one command") == [
         f"Click Copy. irm {base}install.ps1 | iex Copy",
-        "Right-click the Start button and choose Terminal.",
+        "Right-click the Start button and choose Terminal (on Windows 10: Windows PowerShell).",
         "Press Ctrl+V, then Enter.",
         "Wait about 10 minutes. Clean Voice opens by itself. If it stops, do it again.",
     ]

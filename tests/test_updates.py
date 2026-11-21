@@ -609,6 +609,19 @@ def test_the_windows_launch_spec(tmp_path: Path) -> None:
     assert spec.env["CLEAN_VOICE_WAIT_PID"] == "4242"
     assert spec.env["CLEAN_VOICE_STATUS_FILE"] == str(tmp_path / "status")
     assert spec.script is None
+    assert spec.cwd == tmp_path  # not the install folder: Windows cannot rename a folder that is a working directory
+
+
+def test_the_windows_child_starts_in_the_attempts_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_popen(argv: list[str], **kwargs: object) -> object:
+        seen.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(updates.subprocess, "Popen", fake_popen)
+    updates.start_terminal(updates.launch_spec(REPO, "win32", 4242, tmp_path))
+    assert seen["cwd"] == tmp_path
 
 
 def test_the_mac_launch_writes_a_private_command_file(tmp_path: Path) -> None:
