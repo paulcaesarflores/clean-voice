@@ -347,6 +347,17 @@ function Undo-CvSwap {
     if ($Cx.Update) { Write-CvStatus $Cx 'failed' }
 }
 
+# Seam-free helper for the log: what a folder holds, two levels deep.
+function Get-CvListing {
+    param([string]$Path)
+    try {
+        $names = Get-ChildItem -LiteralPath $Path -Recurse -Depth 1 -Force -ErrorAction Stop | ForEach-Object { $_.FullName.Substring($Path.Length) }
+        return '[' + (@($names) -join ', ') + ']'
+    } catch {
+        return '(cannot list: ' + $_ + ')'
+    }
+}
+
 # Order, so a failure leaves a working Clean Voice. The per-user MSI's files are in the very folder the new app goes
 # to, so it is removed while that folder is renamed aside (an MSI removal skips files that are already gone: Microsoft
 # Learn, RemoveFiles action, "removed if the file exists in the specified directory"; the migration run in CI is the
@@ -365,7 +376,16 @@ function Invoke-CvSwap {
         if ($hadOld) { Move-CvTree $Cx.Folder $Cx.Old }
         foreach ($code in $Msi.User) { Remove-CvMsi $code $false }
         New-Item -ItemType Directory -Path (Split-Path -Parent $Cx.Folder) -Force | Out-Null
+        # Whatever stands at the folder now is not ours (the old copy is in .old): a folder left there would make the
+        # move put the new tree INSIDE it (CI run 44898585914: "Clean Voice.exe is missing" after a per-user MSI removal).
+        if ($hadOld -and (Test-Path -LiteralPath $Cx.Folder)) {
+            Write-CvLog $Cx ('Folder reappeared after the MSI removal: ' + (Get-CvListing $Cx.Folder))
+            Remove-CvTree $Cx.Folder
+        }
         Move-CvTree $Cx.NewTree $Cx.Folder
+        if (-not (Test-Path -LiteralPath (Join-Path $Cx.Folder 'Clean Voice.exe'))) {
+            throw ('Clean Voice.exe is not in the new folder: ' + (Get-CvListing $Cx.Folder))
+        }
         foreach ($code in $Msi.Machine) { Remove-CvMsi $code $true; $machineRemoved = $true }
         Remove-CvTree $Cx.Old
     } catch {

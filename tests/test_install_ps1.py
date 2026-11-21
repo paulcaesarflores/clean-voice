@@ -75,6 +75,8 @@ function Start-Process {
         Folder = (Get-Text (Join-Path $c.Folder 'Clean Voice.exe')); Old = (Get-Text (Join-Path $c.Old 'Clean Voice.exe'))
     })
     if ($FilePath -ne 'msiexec') { return }
+    # A real per-user MSI removal can leave an empty folder at its install path (CI run 44898585914).
+    if ($global:MsiLeavesFolder -and -not $Verb) { New-Item -ItemType Directory -Path $c.Folder -Force | Out-Null }
     if ($global:Cancel) { throw (New-Object System.ComponentModel.Win32Exception 1223) }
     [pscustomobject]@{ ExitCode = $global:Exit }
 }
@@ -549,6 +551,38 @@ def test_a_failed_per_user_removal_stops_with_the_old_copy_intact(ps, failure: s
     assert any(line.startswith("SWAP|error|CVPLAIN:" + DECLINED) for line in out)
     s = state(out)
     assert (s["folder"], s["old"], s["key"], s["launched"]) == ("old", "False", "True", "0")
+
+
+def test_every_msiexec_call_waits_and_reads_the_exit_code() -> None:
+    # msiexec is a GUI-subsystem program: called bare, PowerShell would not wait and the removal would run beside the swap.
+    text = INSTALL.read_text(encoding="ascii")
+    calls = re.findall(r"^[^#\n]*msiexec[^\n]*$", text, flags=re.MULTILINE)
+    assert calls
+    for call in calls:
+        assert "Start-Process" in call and "-Wait" in call and "-PassThru" in call, call
+
+
+def test_a_folder_left_by_the_msi_removal_does_not_swallow_the_new_tree(ps) -> None:
+    # Move-Item into an existing folder nests the tree ("...\Clean Voice\src\Clean Voice.exe"): the guest would be left
+    # with no app and a "Clean Voice is installed" line.
+    out = ps(swap_scenario(setup=f"Add-Msi 'User' '{GUID_U}'; $global:MsiLeavesFolder = $true"))
+    assert "SWAP|ok|machineRemoved=False" in out
+    s = state(out)
+    assert (s["folder"], s["old"], s["newtree"]) == ("new", "False", "False")
+
+
+def test_a_move_that_leaves_no_exe_is_rolled_back(ps) -> None:
+    out = ps(
+        swap_scenario(
+            setup=(
+                "function Move-CvTree { param($From, $To) if ($From -eq $global:TestCx.NewTree) "
+                "{ New-Item -ItemType Directory -Path $To | Out-Null } else { Move-Item -LiteralPath $From -Destination $To } }"
+            )
+        )
+    )
+    assert any(line.startswith("SWAP|error|") for line in out)
+    s = state(out)
+    assert (s["folder"], s["old"], s["key"]) == ("old", "False", "True")
 
 
 def test_the_swap_replaces_the_folder_and_deletes_a_stale_old(ps) -> None:

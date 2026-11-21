@@ -262,7 +262,8 @@ def windows_check_install(version: str, expect_one: bool = True) -> None:
     smoke_app, paths = sibling("smoke_app"), windows_paths()
     for name in ("exe", "shortcut"):
         if not paths[name].is_file():
-            raise SmokeError(f"{paths[name]} is missing")
+            held = sorted(str(p.relative_to(paths["folder"])) for p in paths["folder"].rglob("*"))[:20]
+            raise SmokeError(f"{paths[name]} is missing (the folder holds: {held})")
     if not (paths["folder"] / "installed-by-command").is_file():
         raise SmokeError("the installed-by-command marker is missing (Install update needs it)")
     if paths["setup"].exists():
