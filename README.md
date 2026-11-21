@@ -7,41 +7,17 @@
 Clean Voice removes background noise from your microphone and gives your voice a clear, even sound before it
 reaches your call. It's free, made for podcast guests, and needs no audio know-how.
 
-<a href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-Windows.msi"><img alt="Download for Windows" src="https://img.shields.io/badge/Download_for_Windows-Windows_10_or_11-2d6cdf?style=for-the-badge&logo=windows&logoColor=white" height="42"></a>
-&nbsp;
-<a href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-macOS.dmg"><img alt="Download for Mac" src="https://img.shields.io/badge/Download_for_Mac-macOS_13_or_later-1f9d55?style=for-the-badge&logo=apple&logoColor=white" height="42"></a>
-
-[Download page](https://paulcaesarflores.github.io/clean-voice/) · [All releases](https://github.com/paulcaesarflores/clean-voice/releases)
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/site/running-dark.png">
-  <img alt="The Clean Voice window: a status headline with a power button, then five numbered steps from choosing your microphone to recording a backup" src="docs/site/running.png" width="640">
-</picture>
-
 </div>
-
-## Get started in 3 steps
-
-1. **Install VB-CABLE.** It's a free virtual cable from VB-Audio that carries your clean voice into the call app.
-   [Download VB-CABLE](https://vb-audio.com/Cable/), install it, then restart your computer.
-2. **Install Clean Voice** one of the [two ways below](#install-clean-voice), then open it and pick your microphone.
-3. **In your call app** (Google Meet, Zoom, Discord or Teams), choose this as your microphone:
-   - **CABLE Output** on Windows
-   - **VB-Cable** on Mac
-
-   Then turn off the call app's own noise cancellation: Clean Voice already handles it.
-
-That's it. If Clean Voice's headline says **"Your call hears your clean voice"**, you're ready.
 
 ## Install Clean Voice
 
-Find your computer below. Pick **Way 1** or **Way 2**. Both give you the same app.
+Click your computer below to open its steps. Then pick **Way 1** or **Way 2**: both give you the same app.
 
-### Windows
+<details>
+<summary><b>Windows</b> (click to open)</summary>
 
-**Way 1: the installer**
+### Way 1: the installer
 
-> [!IMPORTANT]
 > **First, turn off Smart App Control.** Clean Voice is safe, free, and its code is public, right here. Windows
 > blocks it only because it isn't signed. Signing costs a monthly fee to Microsoft, which this free app doesn't pay.
 
@@ -51,7 +27,7 @@ Find your computer below. Pick **Way 1** or **Way 2**. Both give you the same ap
 4. Open the file you downloaded and follow the installer.
 5. If Windows says "Windows protected your PC", click **More info**, then **Run anyway**.
 
-**Way 2: one command**
+### Way 2: one command
 
 1. Copy this line:
 
@@ -63,16 +39,21 @@ Find your computer below. Pick **Way 1** or **Way 2**. Both give you the same ap
 3. Press **Ctrl+V**, then **Enter**.
 4. Wait about 10 minutes. Clean Voice opens by itself. If it stops, do it again.
 
-### Mac
+To remove Clean Voice later, use **Settings → Apps → Installed apps**, as for any app.
 
-**Way 1: the installer**
+</details>
+
+<details>
+<summary><b>Mac</b> (click to open)</summary>
+
+### Way 1: the installer
 
 1. Click [**Download for Mac**](https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-macOS.dmg).
 2. Open the file you downloaded and drag **Clean Voice** into **Applications**.
 3. Open Clean Voice. If your Mac says it can't open it: **System Settings → Privacy & Security**, scroll down,
    click **Open Anyway**.
 
-**Way 2: one command**
+### Way 2: one command
 
 1. Copy this line:
 
@@ -85,7 +66,27 @@ Find your computer below. Pick **Way 1** or **Way 2**. Both give you the same ap
 4. If your Mac asks to install developer tools, click **Install**.
 5. Wait about 10 minutes. Clean Voice opens by itself. If it stops, do it again.
 
-To remove Clean Voice on Windows, use **Settings → Apps → Installed apps**, as for any app.
+</details>
+
+## Then set it up in 3 steps
+
+1. **Install VB-CABLE.** It's a free virtual cable from VB-Audio that carries your clean voice into the call app.
+   [Download VB-CABLE](https://vb-audio.com/Cable/), install it, then restart your computer.
+2. **Open Clean Voice** and pick your microphone.
+3. **In your call app** (Google Meet, Zoom, Discord or Teams), choose this as your microphone:
+   - **CABLE Output** on Windows
+   - **VB-Cable** on Mac
+
+   Then turn off the call app's own noise cancellation: Clean Voice already handles it.
+
+That's it. If Clean Voice's headline says **"Your call hears your clean voice"**, you're ready.
+
+<div align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/site/running-dark.png">
+  <img alt="The Clean Voice window: a status headline with a power button, then five numbered steps from choosing your microphone to recording a backup" src="docs/site/running.png" width="640">
+</picture>
+</div>
 
 ## What it does
 
@@ -123,8 +124,8 @@ Clean Voice works with any app that lets you pick a microphone.
 Clean Voice is free and isn't signed with a paid certificate, so your computer warns you the first time you open it.
 This is expected:
 
-- **Windows Smart App Control:** if Windows blocks Clean Voice, turn Smart App Control off as in
-  [Windows, Way 1](#windows). It blocks every unsigned app, however it was installed.
+- **Windows Smart App Control:** if Windows blocks Clean Voice, turn Smart App Control off as in the Windows steps
+  under [Install Clean Voice](#install-clean-voice). It blocks every unsigned app, however it was installed.
 - **Windows:** if you see "Windows protected your PC", click **More info**, then **Run anyway**.
 - **Mac:** if you see "Clean Voice can't be opened", open **System Settings → Privacy & Security**, scroll down
   and click **Open Anyway**.
