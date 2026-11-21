@@ -429,8 +429,9 @@ def test_the_mockup_texts_are_on_the_page() -> None:
     # B019-4: "Windows or Mac warns you?" stays until a real PC run shows no warning, unchanged.
     assert '<h2 id="warn-title">Windows or Mac warns you?</h2>' in html
     assert "click <em>More info</em>, then <em>Run anyway</em>" in html
-    # B019-7: one line says what the command downloads.
-    assert "downloads Python packages from PyPI" in html
+    # B019-7 (ledger decision): what the command downloads is a Note for the orchestrator, not guest-facing jargon.
+    assert "PyPI" not in html
+    assert "MinGit" not in html
 
 
 def test_apply_fills_each_command_from_the_pages_own_address(engine: QJSEngine) -> None:

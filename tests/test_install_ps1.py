@@ -205,6 +205,12 @@ def test_placeholders_appear_once() -> None:
     assert text.count("@@SOURCE_SHA256@@") == 1
 
 
+def test_briefcase_home_is_made_before_use() -> None:
+    # CI run 44893694468: Briefcase refuses a BRIEFCASE_HOME that does not exist (briefcase/commands/base.py:211-217).
+    text = INSTALL.read_text(encoding="ascii")
+    assert re.search(r"\$env:BRIEFCASE_HOME = \(New-Item -ItemType Directory -Force", text)
+
+
 def test_pins_equal_pyproject(ps) -> None:
     dev = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["dependency-groups"]["dev"]
     (pin,) = [d.split("==")[1] for d in dev if d.startswith("briefcase==")]

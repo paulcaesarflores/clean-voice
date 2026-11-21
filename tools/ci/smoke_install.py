@@ -30,7 +30,7 @@ import threading
 import urllib.request
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import ModuleType
 
 HERE = Path(__file__).resolve().parent
@@ -166,7 +166,7 @@ def registry_problems(values: Mapping[str, object], folder: str, version: str) -
             problems.append(f"{name} is {values.get(name)!r}, expected {want!r}")
     if values.get("InstallLocation") != folder:
         problems.append(f"InstallLocation is {values.get('InstallLocation')!r}, expected {folder!r}")
-    if values.get("DisplayIcon") != str(Path(folder) / EXE_NAME):
+    if values.get("DisplayIcon") != str(PureWindowsPath(folder) / EXE_NAME):  # a Windows path, whichever OS judges it
         problems.append(f"DisplayIcon is {values.get('DisplayIcon')!r}")
     uninstall = str(values.get("UninstallString", ""))
     if not uninstall.startswith("powershell.exe") or "Uninstall Clean Voice.ps1" not in uninstall:
@@ -370,7 +370,7 @@ def mac_check_install(arch: str | None) -> None:
     marker = Path.home() / "Library" / "Application Support" / "Clean Voice" / "installed-by-command"
     if not marker.is_file() or marker.read_text().strip() != sha256(binary):
         raise SmokeError("the installed-by-command marker is missing or does not match the app")
-    if Path.home().joinpath("Library", "Caches", "Clean Voice Setup").exists():
+    if Path.home().joinpath("Library", "Caches", "CVSetup").exists():
         raise SmokeError("the setup folder was not removed")
     binaries = [binary, *sorted(p for p in app.rglob("*") if p.suffix in (".so", ".dylib") and p.is_file())]
     problems: list[str] = []

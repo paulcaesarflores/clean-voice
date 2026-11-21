@@ -437,7 +437,8 @@ function Invoke-CvInstall {
         # this process's PATH only); create.py:87-113 (binary wheels only, so no compiler); default format is `app`
         # (briefcase/platforms/windows/__init__.py:29).
         $env:Path = (Join-Path $Cx.Work 'mingit\cmd') + ';' + $env:Path
-        $env:BRIEFCASE_HOME = Join-Path $Cx.Work 'briefcase'
+        # Briefcase refuses a BRIEFCASE_HOME that does not exist (briefcase/commands/base.py:211-217), so make it first.
+        $env:BRIEFCASE_HOME = (New-Item -ItemType Directory -Force -Path (Join-Path $Cx.Work 'briefcase')).FullName
         Set-Location -LiteralPath $Cx.Source
         Invoke-CvNative $Cx $python @('-m', 'briefcase', 'create', 'windows', '--no-input')
         Invoke-CvNative $Cx $python @('-m', 'briefcase', 'build', 'windows', '--no-input')

@@ -1,0 +1,2 @@
+# The Mac script runs under bash: it must stay LF on a Windows checkout too (a CR breaks bash).
+tools/install/*.sh text eol=lf

@@ -28,7 +28,7 @@ APP_NAME='Clean Voice.app'
 init_vars() {
     BASE="${CLEAN_VOICE_BASE:-$DEFAULT_BASE}"
     BASE="${BASE%/}"
-    WORK="$HOME/Library/Caches/Clean Voice Setup"
+    WORK="$HOME/Library/Caches/CVSetup"
     LOG="$HOME/Library/Logs/Clean Voice Install.log"
     APPS_SYSTEM='/Applications'
     APPS_USER="$HOME/Applications"
@@ -290,6 +290,9 @@ main() {
     export UV_PYTHON_INSTALL_DIR="$WORK/python"
     export UV_CACHE_DIR="$WORK/uvcache"
     export BRIEFCASE_HOME="$WORK/briefcase"
+    # Briefcase refuses a BRIEFCASE_HOME that does not exist (briefcase/commands/base.py:211-217) or has a space (:232-246),
+    # so the work folder is CVSetup, with no space, and this folder is made first.
+    mkdir -p "$BRIEFCASE_HOME" || die_step 'could not make the build folder'
     local uv="$WORK/uv/uv" python="$WORK/venv/bin/python"
     run_logged "$uv" python install 3.12 || die_step 'could not get Python'
     run_logged "$uv" venv --python 3.12 --seed "$WORK/venv" || die_step 'could not make the Python environment'

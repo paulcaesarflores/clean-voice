@@ -36,6 +36,14 @@ def test_placeholders_appear_once() -> None:
     assert text.count("@@SOURCE_SHA256@@") == 1
 
 
+def test_briefcase_home_exists_and_the_work_folder_has_no_space() -> None:
+    # CI run 44893694468: Briefcase refuses a missing BRIEFCASE_HOME and one with a space (briefcase/commands/base.py:211-246).
+    text = SCRIPT.read_text(encoding="ascii")
+    assert 'mkdir -p "$BRIEFCASE_HOME"' in text
+    (work,) = [line for line in text.splitlines() if line.strip().startswith('WORK="$HOME/')]
+    assert " " not in work.split("=", 1)[1]
+
+
 def test_main_is_called_on_the_last_line() -> None:
     last = SCRIPT.read_text(encoding="ascii").rstrip().splitlines()[-1]
     assert last == 'if [ -z "${CLEAN_VOICE_TEST_IMPORT:-}" ]; then main "$@"; fi'
@@ -130,7 +138,8 @@ def make_app(folder: Path, text: str) -> Path:
 
 def marker(app: Path) -> str:
     path = app / "Contents" / "marker"
-    return path.read_text(encoding="ascii") if path.exists() else "none"
+    # strip: the fake build writes its marker with `echo` (a trailing newline), make_app without one
+    return path.read_text(encoding="ascii").strip() if path.exists() else "none"
 
 
 def test_bash_syntax_is_valid(sh) -> None:
