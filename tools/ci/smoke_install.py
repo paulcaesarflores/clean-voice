@@ -295,6 +295,14 @@ def windows_uninstall() -> None:
         raise SmokeError(f"after the registered uninstall: left {leftovers} {windows_entries()}")
 
 
+def old_copy_problem(old_exe: Path, new_exe: Path) -> str | None:
+    """The old MSI's copy must be gone when it lived elsewhere. The exe's hash cannot tell old from new: v0.2.0's
+    release and this build are both 0.2.0 and the Briefcase stub exe is byte-identical (run 44897085234)."""
+    if old_exe != new_exe and old_exe.exists():
+        return f"the old MSI's copy {old_exe} is still there"
+    return None
+
+
 def windows_old_install(scope: str, work: Path) -> None:
     """v0.2.0's real MSI, installed silently for all users (``machine``) or this user (``user``)."""
     msi = work / "old.msi"
@@ -321,7 +329,6 @@ def windows_from_old(base: str, scope: str, work: Path, version: str) -> None:
     )
     if old_exe is None:
         raise SmokeError("the old MSI's exe was not found")
-    old_hash = sha256(old_exe)
     paths["prefs"].parent.mkdir(parents=True, exist_ok=True)
     paths["prefs"].write_text(PREFS, encoding="utf-8")
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
@@ -331,8 +338,9 @@ def windows_from_old(base: str, scope: str, work: Path, version: str) -> None:
     entries = windows_entries()
     if entries != ["HKCU\\CleanVoice"]:
         raise SmokeError(f"expected one Clean Voice after replacing the old MSI, found {entries} (was {before})")
-    if sha256(paths["exe"]) == old_hash:
-        raise SmokeError("the exe is still the old MSI's")
+    problem = old_copy_problem(old_exe, paths["exe"])
+    if problem:
+        raise SmokeError(problem)
     if paths["prefs"].read_text(encoding="utf-8") != PREFS:
         raise SmokeError("the prefs file changed")
     problem = run_value_problem(windows_run_value(), lambda p: Path(p).is_file())

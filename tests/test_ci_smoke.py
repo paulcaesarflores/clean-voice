@@ -272,6 +272,17 @@ def test_plist_and_run_value_judgement(install_smoke: ModuleType) -> None:
     assert "gone" in install_smoke.run_value_problem(None, exists)
 
 
+def test_old_copy_problem_ignores_identical_stub_exes(install_smoke: ModuleType, tmp_path: Path) -> None:
+    old, new = tmp_path / "ProgramFiles" / "a.exe", tmp_path / "Local" / "a.exe"
+    for exe in (old, new):
+        exe.parent.mkdir()
+        exe.write_bytes(b"same stub")  # v0.2.0 and the 0.2.0 build have identical bytes
+    assert "still there" in install_smoke.old_copy_problem(old, new)
+    old.unlink()
+    assert install_smoke.old_copy_problem(old, new) is None
+    assert install_smoke.old_copy_problem(new, new) is None  # per-user: the same path is replaced in place
+
+
 def test_the_release_folder_is_built_from_git_archive(install_smoke: ModuleType, tmp_path: Path) -> None:
     import shutil
     import subprocess
