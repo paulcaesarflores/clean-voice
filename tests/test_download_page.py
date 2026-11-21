@@ -365,7 +365,7 @@ def test_nothing_loads_from_elsewhere(page: Page) -> None:
         assert (SITE / url).is_file(), url
 
 
-# ---- B019: Windows and Mac side by side, each with two ways as numbered steps -----------------------------------------
+# ---- B019: Windows and Mac tabs above one card, each with two ways as numbered steps -----------------------------------------
 
 
 def test_the_commands_are_the_ones_the_app_runs(engine: QJSEngine) -> None:
@@ -488,12 +488,81 @@ def test_the_mockup_texts_are_on_the_page() -> None:
     assert "MinGit" not in html
 
 
-def test_the_panels_stack_on_a_phone_and_sit_side_by_side_otherwise() -> None:
+def test_the_tabs_are_an_accessible_tablist(page: Page) -> None:
+    lists = [attrs for tag, attrs in page.tags if attrs.get("role") == "tablist"]
+    assert len(lists) == 1 and lists[0].get("aria-label")
+    tabs = [attrs for tag, attrs in page.tags if attrs.get("role") == "tab"]
+    assert [t["data-tab"] for t in tabs] == ["windows", "mac"]  # Windows first
+    assert [t["aria-selected"] for t in tabs] == ["true", "false"]
+    assert [t.get("tabindex") for t in tabs] == [None, "-1"]  # one tab stop; arrow keys move
+    panels = [attrs for tag, attrs in page.tags if attrs.get("role") == "tabpanel"]
+    assert [p["data-os-target"] for p in panels] == ["windows", "mac"]
+    for tab, panel in zip(tabs, panels, strict=True):
+        assert tab["aria-controls"] == panel["id"] and panel["aria-labelledby"] == tab["id"]
+        assert "hidden" not in panel  # without JavaScript both show
+    js = (SITE / "download.js").read_text(encoding="utf-8")
+    for key in ("ArrowLeft", "ArrowRight", "Home", "End"):
+        assert key in js
+
+
+def test_without_javascript_the_tabs_are_hidden_and_both_cards_show() -> None:
     css = (SITE / "style.css").read_text(encoding="utf-8")
-    assert re.search(r"\.computers \{[^}]*grid-template-columns: 1fr 1fr;", css)
-    phone = css[css.index("@media (max-width: 600px)") :]
-    assert re.search(r"\.computers \{[^}]*grid-template-columns: 1fr;", phone)
+    assert re.search(r"\.tabs \{[^}]*display: none;", css)
+    assert re.search(r"html\[data-os\] \.tabs \{[^}]*display: flex;", css)
+    assert re.search(r"\.tab\[aria-selected=\"true\"\] \{[^}]*background: var\(--desk\);", css)
+    assert (
+        "grid-template-columns"
+        not in css.split("/* ---------------------------------------------------------------- the three steps")[0]
+    )
     assert "os-block" not in css and "other-os" not in css  # the one-computer swap is gone
+
+
+# Runs apply() on a document of two tabs and two panels (and their keys); returns [tab states, panel hidden flags].
+FAKE_TABS = """(function (uaData, ua, touch, then) {
+  function el(attrs) {
+    return { attrs: attrs, hidden: false,
+             getAttribute: function (k) { return k in this.attrs ? this.attrs[k] : null; },
+             setAttribute: function (k, v) { this.attrs[k] = v; } };
+  }
+  var tabs = [el({ "data-tab": "windows" }), el({ "data-tab": "mac" })];
+  var panels = [el({ "data-os-target": "windows" }), el({ "data-os-target": "mac" })];
+  var doc = { documentElement: { setAttribute: function () {} },
+              querySelectorAll: function (sel) {
+                return sel === "[data-tab]" ? tabs : sel === "[data-os-target]" ? panels : []; } };
+  CleanVoiceDownload.apply(doc, { userAgentData: uaData, userAgent: ua, maxTouchPoints: touch },
+                           { hostname: "someone.github.io", pathname: "/clean-voice/" });
+  if (then) CleanVoiceDownload.selectTab(doc, then);
+  return [tabs.map(function (t) { return t.attrs["aria-selected"]; }),
+          panels.map(function (p) { return p.hidden; })];
+})"""
+
+
+@pytest.mark.parametrize(
+    ("ua_data", "user_agent", "touch", "selected"),
+    [
+        (None, WINDOWS_CHROME, 0, "windows"),
+        (None, MAC_SAFARI, 0, "mac"),
+        ({"platform": "macOS", "mobile": False}, MAC_CHROME, 0, "mac"),
+        (None, LINUX_FIREFOX, 0, "windows"),  # an unknown computer: Windows first, as without JavaScript
+        (None, IPHONE, 5, "windows"),
+    ],
+)
+def test_the_tab_for_the_visitors_computer_is_selected(
+    engine: QJSEngine, ua_data: dict | None, user_agent: str, touch: int, selected: str
+) -> None:
+    args = f"{json.dumps(ua_data)}, {json.dumps(user_agent)}, {touch}"
+    states, hidden = call(engine, f"{FAKE_TABS}({args})")  # type: ignore[misc]
+    assert states == (["true", "false"] if selected == "windows" else ["false", "true"])
+    assert hidden == ([False, True] if selected == "windows" else [True, False])
+
+
+def test_choosing_the_other_tab_shows_the_other_panel(engine: QJSEngine) -> None:
+    args = f"null, {json.dumps(WINDOWS_CHROME)}, 0"
+    assert call(engine, f"{FAKE_TABS}({args}, 'mac')") == [["false", "true"], [True, False]]
+    assert call(engine, f"{FAKE_TABS}(null, {json.dumps(MAC_SAFARI)}, 0, 'windows')") == [
+        ["true", "false"],
+        [False, True],
+    ]
 
 
 def test_apply_fills_each_command_from_the_pages_own_address(engine: QJSEngine) -> None:

@@ -31,13 +31,23 @@
       <p class="tagline">Sound clear on your podcast. Clean Voice is a free app that cleans up your microphone, so the
         host hears your voice, not your room.</p>
 
-      <!-- B019 (docs/ui/mockups/B019-download-page.md): both computers always show, Windows left and Mac right (stacked
-           on a phone), each with Way 1 (the installer) then Way 2 (one command), as numbered steps. download.js builds
+      <!-- B019 (docs/ui/mockups/B019-download-page.md): Windows and Mac tabs above one card, each panel with Way 1 (the installer) then Way 2 (one command), as numbered steps. download.js builds
            each link and command from the page's own address; without JavaScript the HTML's own (the fallback repo) work. -->
       <p class="lead">Find your computer below. Pick Way 1 or Way 2. Both give you the same app.</p>
-      <div class="computers">
-        <section class="computer" data-os-target="windows" aria-labelledby="os-windows">
-          <h2 id="os-windows">
+      <div class="install">
+        <!-- Tabs need JavaScript (download.js selects the visitor's computer); without it both panels show, Windows first. -->
+        <div class="tabs" role="tablist" aria-label="Choose your computer">
+          <button class="tab" role="tab" type="button" id="tab-windows" data-tab="windows" aria-controls="panel-windows" aria-selected="true">
+            <svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M2 4.6 10.4 3.4v7.4H2V4.6Zm9.6-1.4L22 1.8v9H11.6V3.2ZM2 12.2h8.4v7.4L2 18.4v-6.2Zm9.6 0H22v9l-10.4-1.4v-7.6Z"/></svg>
+            Windows
+          </button>
+          <button class="tab" role="tab" type="button" id="tab-mac" data-tab="mac" aria-controls="panel-mac" aria-selected="false" tabindex="-1">
+            <svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M1.5 19.5h21" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+            Mac
+          </button>
+        </div>
+        <section class="computer" role="tabpanel" id="panel-windows" data-os-target="windows" aria-labelledby="tab-windows">
+          <h2>
             <svg class="os-icon" viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path fill="currentColor" d="M2 4.6 10.4 3.4v7.4H2V4.6Zm9.6-1.4L22 1.8v9H11.6V3.2ZM2 12.2h8.4v7.4L2 18.4v-6.2Zm9.6 0H22v9l-10.4-1.4v-7.6Z"/></svg>
             Windows
           </h2>
@@ -80,8 +90,8 @@
           </section>
         </section>
 
-        <section class="computer" data-os-target="mac" aria-labelledby="os-mac">
-          <h2 id="os-mac">
+        <section class="computer" role="tabpanel" id="panel-mac" data-os-target="mac" aria-labelledby="tab-mac">
+          <h2>
             <svg class="os-icon" viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M1.5 19.5h21" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
             Mac
           </h2>

@@ -1,6 +1,6 @@
 /* Clean Voice's download page: builds every GitHub link and the install commands from the page's own address, wires the
-   Copy buttons, and names the call-app microphone and the screenshot for the visitor's computer. Both computers' install
-   steps always show. No libraries, no cookies, nothing is sent anywhere. Without this script the links and commands in the
+   Copy buttons, and names the call-app microphone and the screenshot for the visitor's computer. The Windows and Mac tabs show one
+   computer's install steps at a time (the visitor's own first); without this script both show. No libraries, no cookies, nothing is sent anywhere. Without this script the links and commands in the
    HTML (the fallback repo below) still work. Tested by tests/test_download_page.py. */
 (function (root) {
   "use strict";
@@ -91,6 +91,20 @@
     };
   }
 
+  /* Shows one computer's panel and marks its tab (the tabs pattern of the WAI-ARIA practices: aria-selected, one tab stop). */
+  function selectTab(doc, name) {
+    var tabs = doc.querySelectorAll("[data-tab]");
+    for (var i = 0; i < tabs.length; i++) {
+      var on = tabs[i].getAttribute("data-tab") === name;
+      tabs[i].setAttribute("aria-selected", on ? "true" : "false");
+      tabs[i].setAttribute("tabindex", on ? "0" : "-1");
+    }
+    var panels = doc.querySelectorAll("[data-os-target]");
+    for (var j = 0; j < panels.length; j++) {
+      panels[j].hidden = panels[j].getAttribute("data-os-target") !== name;
+    }
+  }
+
   /* Sets every [data-link] address, every [data-command] text, every [data-cable] name, the [data-shot] screenshot and the page's data-os,
      which the style sheet reads (it shows the Copy buttons). */
   function apply(doc, nav, loc) {
@@ -117,6 +131,7 @@
       var shot = (os === "mac" ? SHOTS.mac : SHOTS.windows)[shots[k].getAttribute("data-shot")];
       if (shot) shots[k].setAttribute(shots[k].tagName.toLowerCase() === "source" ? "srcset" : "src", shot);
     }
+    selectTab(doc, os === "mac" ? "mac" : "windows");
     doc.documentElement.setAttribute("data-os", os);
   }
 
@@ -130,7 +145,7 @@
     }
   }
 
-  /* Wires the Copy buttons (a real page only). */
+  /* Wires the tabs and the Copy buttons (a real page only). */
   function wire(doc, nav, loc) {
     var copy = function (button) {
       button.addEventListener("click", function () {
@@ -151,6 +166,23 @@
         });
       });
     };
+    var tabs = doc.querySelectorAll("[data-tab]");
+    var pick = function (index) {
+      var tab = tabs[(index + tabs.length) % tabs.length];
+      selectTab(doc, tab.getAttribute("data-tab"));
+      tab.focus();
+    };
+    var tab = function (index) {
+      tabs[index].addEventListener("click", function () { selectTab(doc, tabs[index].getAttribute("data-tab")); });
+      tabs[index].addEventListener("keydown", function (event) {
+        var keys = { ArrowLeft: index - 1, ArrowUp: index - 1, ArrowRight: index + 1, ArrowDown: index + 1, Home: 0, End: tabs.length - 1 };
+        if (event.key in keys) {
+          event.preventDefault();
+          pick(keys[event.key]);
+        }
+      });
+    };
+    for (var t = 0; t < tabs.length; t++) tab(t);
     var copies = doc.querySelectorAll("[data-copy]");
     for (var i = 0; i < copies.length; i++) copy(copies[i]);
   }
@@ -166,6 +198,7 @@
     links: links,
     commands: commands,
     copyCommand: copyCommand,
+    selectTab: selectTab,
     apply: apply
   };
 

@@ -139,35 +139,94 @@ h1 {
   font-size: 20px;
 }
 
-/* B019: Windows left, Mac right (stacked on a phone), each with Way 1 then Way 2 as numbered steps. */
+/* B019: Windows and Mac tabs above one card (download.js picks the visitor's computer); without JavaScript the tabs
+   are hidden and both cards show, Windows first. Each card has Way 1 then Way 2 as numbered steps. */
 .lead {
-  margin: 0 0 24px;
+  margin: 0 0 28px;
   font-size: 20px;
 }
 
-.computers {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-  align-items: start;
+.install {
+  max-width: 680px;
+  margin: 0 auto;
   text-align: left;
+}
+
+.tabs {
+  display: none;
+  gap: 4px;
+  margin: 0 auto 20px;
+  padding: 4px;
+  max-width: 360px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+}
+
+html[data-os] .tabs {
+  display: flex;
+}
+
+.tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font: 600 21px/1.2 var(--headline);
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.tab[aria-selected="true"] {
+  background: var(--desk);
+  color: var(--on-desk);
+}
+
+.tab:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.tab-icon {
+  flex: none;
 }
 
 .computer {
   min-width: 0;
-  padding: 22px 22px 24px;
+  padding: 32px 36px 36px;
   background: var(--panel);
   border: 1px solid var(--rule);
-  border-radius: 12px;
+  border-radius: 14px;
 }
 
+.computer[hidden] {
+  display: none;
+}
+
+.computer + .computer {
+  margin-top: 24px;
+}
+
+/* The tab names the computer; the heading is for the page without JavaScript. */
 .computer h2 {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 18px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--rule);
+  margin-bottom: 24px;
+}
+
+html[data-os] .computer h2 {
+  display: none;
 }
 
 .os-icon {
@@ -175,20 +234,20 @@ h1 {
 }
 
 .way + .way {
-  margin-top: 28px;
-  padding-top: 22px;
+  margin-top: 36px;
+  padding-top: 32px;
   border-top: 1px solid var(--rule);
 }
 
 .way h3 {
-  margin-bottom: 12px;
-  font-size: 23px;
+  margin-bottom: 18px;
+  font-size: 24px;
 }
 
 .note {
   display: flex;
   gap: 14px;
-  margin: 0 0 18px;
+  margin: 0 0 24px;
   padding: 16px 18px;
   background: var(--panel);
   border: 1px solid var(--rule);
@@ -270,18 +329,35 @@ html[data-os] .copy {
 }
 
 .install-steps {
+  list-style: none;
+  counter-reset: install;
   margin: 0;
-  padding-left: 26px;
+  padding: 0;
 }
 
 .install-steps li {
-  margin-bottom: 12px;
-  padding-left: 4px;
+  counter-increment: install;
+  position: relative;
+  margin-bottom: 18px;
+  padding-left: 44px;
 }
 
-.install-steps li::marker {
-  color: var(--muted);
-  font-weight: 600;
+.install-steps li:last-child {
+  margin-bottom: 0;
+}
+
+.install-steps li::before {
+  content: counter(install);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--signal);
+  color: var(--on-signal);
+  font: 600 17px/30px var(--headline);
+  text-align: center;
 }
 
 .install-steps strong {
@@ -291,7 +367,7 @@ html[data-os] .copy {
 
 .install-steps .download,
 .install-steps .command-box {
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 .download {
@@ -447,12 +523,17 @@ footer {
     font-size: 18px;
   }
 
-  .computers {
-    grid-template-columns: 1fr;
+  .tabs {
+    max-width: none;
   }
 
   .computer {
-    padding: 18px 16px 20px;
+    padding: 22px 18px 24px;
+  }
+
+  .way + .way {
+    margin-top: 28px;
+    padding-top: 24px;
   }
 
   .way h3 {
