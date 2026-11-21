@@ -7,6 +7,8 @@
 Clean Voice removes background noise from your microphone and gives your voice a clear, even sound before it
 reaches your call. It's free, made for podcast guests, and needs no audio know-how.
 
+**[Download page](https://paulcaesarflores.github.io/clean-voice/)** · [All releases](https://github.com/paulcaesarflores/clean-voice/releases)
+
 </div>
 
 ## Install Clean Voice
