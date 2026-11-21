@@ -76,6 +76,12 @@ function Write-CvLog {
     try { Add-Content -LiteralPath $Cx.Log -Value $Text } catch { $null = $_ }
 }
 
+# A log line with the time to the millisecond, for the swap's timeline (B019 CI: files vanished after the swap).
+function Write-CvMark {
+    param([hashtable]$Cx, [string]$Text)
+    Write-CvLog $Cx ('[' + (Get-Date).ToString('HH:mm:ss.fff') + '] ' + $Text)
+}
+
 function Write-CvLine {
     param([hashtable]$Cx, [string]$Text)
     Write-Host $Text
@@ -241,10 +247,12 @@ function Find-CvOldMsi {
 # product is removed with Start-Process -Verb RunAs, which shows Windows' own admin prompt: a plain msiexec does not
 # prompt, it fails with 1925. A declined prompt throws "cancelled by the user".
 function Remove-CvMsi {
-    param([string]$Code, [bool]$Machine)
+    param([string]$Code, [bool]$Machine, [string]$MsiLog = '')
     $declined = ("An older Clean Voice couldn't be removed (Windows asked for an administrator and it was declined, " +
         "or it failed). Remove 'Clean Voice' in Settings > Installed apps, then run the command again.")
     $argText = "/x $Code /qn"
+    # msiexec's own verbose log (Microsoft Learn, msiexec: /l*v): what it removed and when.
+    if ($MsiLog) { $argText += ' /l*v "' + $MsiLog + '"' }
     try {
         if ($Machine) {
             $process = Start-Process -FilePath 'msiexec' -ArgumentList $argText -Verb RunAs -Wait -PassThru
@@ -374,7 +382,12 @@ function Invoke-CvSwap {
     try {
         Remove-CvTree $Cx.Old
         if ($hadOld) { Move-CvTree $Cx.Folder $Cx.Old }
-        foreach ($code in $Msi.User) { Remove-CvMsi $code $false }
+        $msiLog = $Cx.Log -replace '\.log$', '-msi.log'
+        foreach ($code in $Msi.User) {
+            Write-CvMark $Cx "Removing the per-user MSI $code"
+            Remove-CvMsi $code $false $msiLog
+            Write-CvMark $Cx ('MSI removal returned. Folder: ' + (Get-CvListing $Cx.Folder) + ' Old: ' + (Get-CvListing $Cx.Old))
+        }
         New-Item -ItemType Directory -Path (Split-Path -Parent $Cx.Folder) -Force | Out-Null
         # Whatever stands at the folder now is not ours (the old copy is in .old): a folder left there would make the
         # move put the new tree INSIDE it (CI run 44898585914: "Clean Voice.exe is missing" after a per-user MSI removal).
@@ -383,11 +396,13 @@ function Invoke-CvSwap {
             Remove-CvTree $Cx.Folder
         }
         Move-CvTree $Cx.NewTree $Cx.Folder
+        Write-CvMark $Cx ('New tree moved. Folder: ' + (Get-CvListing $Cx.Folder))
         if (-not (Test-Path -LiteralPath (Join-Path $Cx.Folder 'Clean Voice.exe'))) {
             throw ('Clean Voice.exe is not in the new folder: ' + (Get-CvListing $Cx.Folder))
         }
         foreach ($code in $Msi.Machine) { Remove-CvMsi $code $true; $machineRemoved = $true }
         Remove-CvTree $Cx.Old
+        Write-CvMark $Cx ('Swap done. Folder: ' + (Get-CvListing $Cx.Folder))
     } catch {
         $plain = Get-CvPlainMessage $_
         Write-CvLog $Cx "Swap failed: $_"
@@ -484,6 +499,7 @@ function Invoke-CvInstall {
             Write-CvLog $Cx "Registration failed: $_"
             Write-CvLine $Cx "Clean Voice is installed, but Windows couldn't list it in Installed apps / the Start menu."
         }
+        Write-CvMark $Cx ('Registered. Folder: ' + (Get-CvListing $Cx.Folder))
         if ($Cx.Update) {
             Start-CvApp (Join-Path $Cx.Folder 'Clean Voice.exe')
             Write-CvLine $Cx 'Clean Voice was updated and is opening again.'

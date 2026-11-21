@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.request
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -315,6 +316,36 @@ def windows_old_install(scope: str, work: Path) -> None:
         raise SmokeError(f"the old MSI did not install (msiexec exit {done.returncode})")
 
 
+def windows_dump_folder(when: str, folder: Path) -> None:
+    """The install folder's files with their modified times, for the CI log."""
+    stamp = time.strftime("%H:%M:%S")
+    try:
+        held = sorted(
+            f"{p.relative_to(folder)}@{time.strftime('%H:%M:%S', time.localtime(p.stat().st_mtime))}"
+            for p in folder.rglob("*")
+        )
+    except OSError as exc:
+        held = [f"(cannot list: {exc})"]
+    print(f"[{stamp}] folder {when}: {len(held)} entries, first 25: {held[:25]}", flush=True)
+
+
+def windows_dump_installer_events(since: str) -> None:
+    """Windows Installer's Application-log events (source MsiInstaller) since ``since``: 1033/1034 = install/removal
+    finished, 11707/11724 = install/removal succeeded (Microsoft Learn, "Windows Installer event logging")."""
+    script = (
+        f"Get-WinEvent -FilterHashtable @{{LogName='Application';ProviderName='MsiInstaller';StartTime=[datetime]'{since}'}} "
+        "-ErrorAction SilentlyContinue | Sort-Object TimeCreated | ForEach-Object { "
+        "'{0:HH:mm:ss.fff} id={1} {2}' -f $_.TimeCreated, $_.Id, (($_.Message -split \"`n\")[0]) }"
+    )
+    done = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-Command", script], capture_output=True, text=True, check=False
+    )
+    print(f"MsiInstaller events since {since}:\n{done.stdout}{done.stderr}", flush=True)
+    log = Path(os.environ.get("TEMP", "")) / "clean-voice-install.log"
+    if log.is_file():
+        print("install log:\n" + log.read_text(encoding="utf-8", errors="replace"), flush=True)
+
+
 def windows_from_old(base: str, scope: str, work: Path, version: str) -> None:
     assert sys.platform == "win32"
     import winreg
@@ -334,8 +365,16 @@ def windows_from_old(base: str, scope: str, work: Path, version: str) -> None:
     paths["prefs"].write_text(PREFS, encoding="utf-8")
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
         winreg.SetValueEx(key, "Clean Voice", 0, winreg.REG_SZ, f'"{old_exe}" --minimized')
+    started = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - 1))
     run_command("windows", base, work / "install-from-old.log")
-    windows_check_install(version, expect_one=False)
+    windows_dump_folder("right after install.ps1 returned", paths["folder"])
+    try:
+        windows_check_install(version, expect_one=False)
+    except SmokeError:
+        # B019 CI 44900514127: the exe vanished after the swap. Show who removed it and when.
+        windows_dump_folder("when the check failed", paths["folder"])
+        windows_dump_installer_events(started)
+        raise
     entries = windows_entries()
     if entries != ["HKCU\\CleanVoice"]:
         raise SmokeError(f"expected one Clean Voice after replacing the old MSI, found {entries} (was {before})")

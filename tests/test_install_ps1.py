@@ -514,7 +514,8 @@ def test_a_per_user_msi_is_removed_directly_and_a_per_machine_one_through_the_ad
     out = ps(swap_scenario(setup=f"Add-Msi 'User' '{GUID_U}'; Add-Msi 'Machine' '{GUID_M}'; $global:Exit = 3010"))
     calls = lines_with(out, "CALL|")
     assert len(calls) == 2
-    assert calls[0].startswith(f"CALL|/x {GUID_U} /qn|verb=|wait=True|")
+    assert calls[0].startswith(f"CALL|/x {GUID_U} /qn /l*v ")
+    assert "|verb=|wait=True|" in calls[0]
     assert calls[1].startswith(f"CALL|/x {GUID_M} /qn|verb=RunAs|wait=True|")  # exit 3010 (restart needed) succeeds
     assert "SWAP|ok|machineRemoved=True" in out
 
