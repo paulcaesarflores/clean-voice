@@ -41,7 +41,7 @@ function New-TestCx {
         Work = "$t\work"; Folder = "$t\apps\Clean Voice"; Log = "$t\log.txt"
         UninstallRoot = "$reg\Uninstall"; RunKey = "$reg\Run"; StartMenu = "$t\start"
         OldMsiRoots = @(@{ Path = "$reg\UserMsi"; Scope = 'User' }, @{ Path = "$reg\MachineMsi"; Scope = 'Machine' })
-        SacPath = "$reg\CI"; StatusFile = "$t\status.txt"
+        SacPath = "$reg\CI"; StatusFile = "$t\status.txt"; InstallerData = "$reg\InstallerData"
     }
     foreach ($k in $Extra.Keys) { $o[$k] = $Extra[$k] }
     $global:TestCx = New-CvContext $o
@@ -62,6 +62,10 @@ function Add-Msi {
     New-ItemProperty -Path $key -Name DisplayName -Value $Name -Force | Out-Null
     New-ItemProperty -Path $key -Name WindowsInstaller -Value $Installer -PropertyType DWord -Force | Out-Null
 }
+function Add-Owner {
+    param([string]$Sid, [string]$Code)
+    New-Item -Path "$reg\InstallerData\$Sid\Products\$(Get-CvPackedGuid $Code)" -Force | Out-Null
+}
 
 # Fakes. Start-Process records what it was asked for and what the folders looked like at that moment.
 $global:Calls = New-Object System.Collections.ArrayList
@@ -78,6 +82,8 @@ function Start-Process {
     # A real per-user MSI removal can leave an empty folder at its install path (CI run 44898585914).
     if ($global:MsiLeavesFolder -and -not $Verb) { New-Item -ItemType Directory -Path $c.Folder -Force | Out-Null }
     if ($global:Cancel) { throw (New-Object System.ComponentModel.Win32Exception 1223) }
+    # A removal that wipes the new files, as the real one did in CI run 44902719464.
+    if ($global:WipeFolderOn -eq "$Verb") { Remove-Item -LiteralPath $c.Folder -Recurse -Force }
     [pscustomobject]@{ ExitCode = $global:Exit }
 }
 $global:Launched = New-Object System.Collections.ArrayList
@@ -552,6 +558,46 @@ def test_a_failed_per_user_removal_stops_with_the_old_copy_intact(ps, failure: s
     assert any(line.startswith("SWAP|error|CVPLAIN:" + DECLINED) for line in out)
     s = state(out)
     assert (s["folder"], s["old"], s["key"], s["launched"]) == ("old", "False", "True", "0")
+
+
+USER_SID = "S-1-5-21-1-2-3-1001"
+
+
+def test_the_packed_product_code_matches_windows_installers_own_form(ps) -> None:
+    out = ps(r"""Get-CvPackedGuid '{77661479-C123-4B94-A83F-81B3AC874517}'""")
+    assert out == ["97416677321C49B48AF3183BCA785471"]
+
+
+def test_a_per_user_product_registered_under_hklm_is_removed_before_the_move(ps) -> None:
+    # CI run 44902719464: v0.2.0 installed per user by an administrator had its Uninstall key in HKLM but its files in
+    # the per-user folder; classed by hive it was removed after the move and deleted the new app.
+    out = ps(
+        swap_scenario(
+            setup=f"Add-Msi 'Machine' '{GUID_M}'; Add-Owner '{USER_SID}' '{GUID_M}'; $global:MsiLeavesFolder = $true"
+        )
+        + "\n(Find-CvOldMsi $cx).User -join ','\n(Find-CvOldMsi $cx).Machine.Count"
+    )
+    (call,) = lines_with(out, "CALL|")
+    assert call.startswith(f"CALL|/x {GUID_M} /qn /l*v ") and "|verb=|" in call
+    assert call.endswith("|folder=none|old=old")
+    assert "SWAP|ok|machineRemoved=False" in out
+    assert state(out)["folder"] == "new"
+    assert out[-2:] == [GUID_M, "0"]
+
+
+def test_a_product_owned_by_the_system_account_stays_per_machine(ps) -> None:
+    out = ps(swap_scenario(setup=f"Add-Msi 'Machine' '{GUID_M}'; Add-Owner 'S-1-5-18' '{GUID_M}'"))
+    (call,) = lines_with(out, "CALL|")
+    assert call.startswith(f"CALL|/x {GUID_M} /qn|verb=RunAs|") and call.endswith("|folder=new|old=old")
+    assert "SWAP|ok|machineRemoved=True" in out
+
+
+def test_the_last_exe_check_runs_after_every_removal(ps) -> None:
+    # The per-machine removal is the last one; when it deletes the new files the swap rolls back instead of "installed".
+    out = ps(swap_scenario(setup=f"Add-Msi 'Machine' '{GUID_M}'; $global:WipeFolderOn = 'RunAs'"))
+    assert any(line.startswith("SWAP|error|CVPLAIN:") and NOTHING_CHANGED in line for line in out)
+    s = state(out)
+    assert (s["folder"], s["old"], s["key"]) == ("old", "False", "True")  # the old copy is back and registered
 
 
 def test_every_msiexec_call_waits_and_reads_the_exit_code() -> None:

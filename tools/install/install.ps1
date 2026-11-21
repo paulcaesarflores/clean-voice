@@ -53,7 +53,8 @@ function New-CvContext {
             @{ Path = "HKLM:\$uninstallPath"; Scope = 'Machine' },
             @{ Path = "HKLM:\Software\WOW6432Node\$uninstallPath"; Scope = 'Machine' }
         )
-        SacPath       = 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy'
+        InstallerData = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData'
+        SacPath       ='HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy'
         Update        = [bool]$env:CLEAN_VOICE_UPDATE
         WaitPid       = $waitPid
         StatusFile    = $env:CLEAN_VOICE_STATUS_FILE
@@ -236,11 +237,45 @@ function Find-CvOldMsi {
             if ($key.PSChildName -notmatch '^\{[0-9A-Fa-f-]{36}\}$') { continue }
             $props = Get-ItemProperty -LiteralPath $key.PSPath
             if ($props.DisplayName -eq 'Clean Voice' -and $props.WindowsInstaller -eq 1) {
-                $found[$root.Scope] += $key.PSChildName
+                $scope = $root.Scope
+                # The hive is not the scope: v0.2.0's MSI installed per user by an administrator (ALLUSERS=2,
+                # MSIINSTALLPERUSER=1) registered under HKLM yet kept its files in the per-user folder (B019 CI 44902719464).
+                if ($scope -ne 'User') {
+                    $context = Get-CvMsiContext $Cx $key.PSChildName
+                    if ($null -ne $context) { $scope = $context }
+                    Write-CvLog $Cx ('Old MSI ' + $key.PSChildName + ' in ' + $root.Path + ': hive scope ' + $root.Scope + ', install context ' + $context + ', treated as ' + $scope)
+                }
+                $found[$scope] += $key.PSChildName
             }
         }
     }
     $found
+}
+
+# Source: Microsoft Learn, "Windows Installer" install contexts: a product's installation data is kept per owner under
+# HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\<SID>\Products\<packed product code>, where S-1-5-18 (the
+# system account) owns per-machine products and a user's SID owns that user's per-user products. The packed code is the
+# GUID digits with the first three groups reversed and the rest swapped in pairs.
+function Get-CvPackedGuid {
+    param([string]$Code)
+    $digits = $Code.Trim('{', '}').Replace('-', '')
+    $reverse = { param($text) $chars = $text.ToCharArray(); [array]::Reverse($chars); -join $chars }
+    $pairs = { param($text) $out = ''; for ($i = 0; $i -lt $text.Length; $i += 2) { $out += [string]$text[$i + 1] + [string]$text[$i] }; $out }
+    (& $reverse $digits.Substring(0, 8)) + (& $reverse $digits.Substring(8, 4)) + (& $reverse $digits.Substring(12, 4)) + (& $pairs $digits.Substring(16, 16))
+}
+
+# 'Machine', 'User', or $null when Windows Installer's own data does not list the product.
+function Get-CvMsiContext {
+    param([hashtable]$Cx, [string]$Code)
+    $packed = Get-CvPackedGuid $Code
+    if (-not (Test-Path -LiteralPath $Cx.InstallerData)) { return $null }
+    foreach ($owner in Get-ChildItem -LiteralPath $Cx.InstallerData) {
+        if (Test-Path -LiteralPath ($owner.PSPath + '\Products\' + $packed)) {
+            if ($owner.PSChildName -eq 'S-1-5-18') { return 'Machine' }
+            return 'User'
+        }
+    }
+    return $null
 }
 
 # Source: Microsoft's msiexec (/x = uninstall, /qn = no UI; 0 and 3010 "restart needed" are success). A per-machine
@@ -397,10 +432,19 @@ function Invoke-CvSwap {
         }
         Move-CvTree $Cx.NewTree $Cx.Folder
         Write-CvMark $Cx ('New tree moved. Folder: ' + (Get-CvListing $Cx.Folder))
+        # Before the per-machine removal, so a bad move does not remove the old per-machine copy for nothing.
         if (-not (Test-Path -LiteralPath (Join-Path $Cx.Folder 'Clean Voice.exe'))) {
             throw ('Clean Voice.exe is not in the new folder: ' + (Get-CvListing $Cx.Folder))
         }
-        foreach ($code in $Msi.Machine) { Remove-CvMsi $code $true; $machineRemoved = $true }
+        foreach ($code in $Msi.Machine) {
+            Write-CvMark $Cx "Removing the per-machine MSI $code"
+            Remove-CvMsi $code $true
+            $machineRemoved = $true
+        }
+        # The last check, after every removal: a removal that deleted the new files (B019 CI 44902719464) rolls back.
+        if (-not (Test-Path -LiteralPath (Join-Path $Cx.Folder 'Clean Voice.exe'))) {
+            throw ('Clean Voice.exe is not in the folder after the old copy was removed: ' + (Get-CvListing $Cx.Folder))
+        }
         Remove-CvTree $Cx.Old
         Write-CvMark $Cx ('Swap done. Folder: ' + (Get-CvListing $Cx.Folder))
     } catch {
