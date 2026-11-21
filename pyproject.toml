@@ -1,6 +1,6 @@
 [project]
 name = "clean-voice"
-version = "0.2.0"
+version = "0.3.0"
 description = "Cleans a podcast guest's microphone and feeds the clean voice to VB-CABLE."
 requires-python = ">=3.12,<3.13"
 license = "MIT"
@@ -48,7 +48,7 @@ project_name = "clean-voice"
 bundle = "io.github.paulcaesarflores.cleanvoice"
 # Keep equal to [project].version and clean_voice.__version__ (tests/test_project_config.py; the release checks the tag
 # against all three).
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT"
 # The installer's publisher (MSI Manufacturer, registry key, exe CompanyName, bundle METADATA), overriding
 # [project].authors for Briefcase only (DESIGN, Install folder). The copyright holder stays in LICENSE.
