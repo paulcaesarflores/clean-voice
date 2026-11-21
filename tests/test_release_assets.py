@@ -1,5 +1,6 @@
 """The release-assets script ``tools/ci/release_assets.py``: stable installer names and checksum files that the
-in-app updater (``clean_voice.updates``) downloads and verifies."""
+in-app updater (``clean_voice.updates``) downloads and verifies, plus (B019) the source zip and the two stamped install
+scripts the install command fetches."""
 
 import hashlib
 import importlib.util
@@ -18,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "ci" / "release_assets.py"
 VERSION = "0.1.0"
 MSI = b"msi bytes" * 500
+SOURCE = b"zip bytes" * 500
+STAMPED = "v=@@VERSION@@ h=@@SOURCE_SHA256@@\n"
 DMG = b"dmg bytes" * 700
 
 
@@ -42,10 +45,38 @@ def built(tmp_path: Path) -> tuple[Path, Path]:
     return msi_dir, dmg_dir
 
 
-def run(assets: ModuleType, tmp_path: Path, tag: str = f"v{VERSION}") -> tuple[int, Path]:
+def scripts_and_source(tmp_path: Path, ps1: str = STAMPED, sh: str = STAMPED) -> tuple[Path, Path]:
+    """A source zip as ``git archive`` leaves it, and a folder with the two scripts (placeholders in them)."""
+    source = tmp_path / "src.zip"
+    source.write_bytes(SOURCE)
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "install.ps1").write_text(ps1, encoding="ascii", newline="\n")
+    (scripts / "install.sh").write_text(sh, encoding="ascii", newline="\n")
+    return source, scripts
+
+
+def run(assets: ModuleType, tmp_path: Path, tag: str = f"v{VERSION}", **scripts: str) -> tuple[int, Path]:
     msi_dir, dmg_dir = built(tmp_path)
+    source, folder = scripts_and_source(tmp_path, **scripts)
     out = tmp_path / "release"
-    code = assets.main([str(out), "--msi", str(msi_dir), "--dmg", str(dmg_dir), "--tag", tag, "--version", VERSION])
+    code = assets.main(
+        [
+            str(out),
+            "--msi",
+            str(msi_dir),
+            "--dmg",
+            str(dmg_dir),
+            "--source",
+            str(source),
+            "--scripts",
+            str(folder),
+            "--tag",
+            tag,
+            "--version",
+            VERSION,
+        ]
+    )
     return code, out
 
 
@@ -57,7 +88,10 @@ def test_stable_names_and_checksum_files(assets: ModuleType, tmp_path: Path) -> 
         "Clean-Voice-Windows.msi.sha256",
         "Clean-Voice-macOS.dmg",
         "Clean-Voice-macOS.dmg.sha256",
+        "Clean-Voice-source.zip",
         "SHA256SUMS",
+        "install.ps1",
+        "install.sh",
     ]
     msi_sum, dmg_sum = hashlib.sha256(MSI).hexdigest(), hashlib.sha256(DMG).hexdigest()
     # sha256sum's text format, `<hex>  <name>`: what `sha256sum -c` and updates.parse_sums read.
@@ -112,7 +146,9 @@ def test_a_tag_that_is_not_the_app_version_is_refused(assets: ModuleType, tmp_pa
 def test_exactly_one_installer_per_artifact(assets: ModuleType, tmp_path: Path) -> None:
     msi_dir, dmg_dir = built(tmp_path)
     (msi_dir / "other.msi").write_bytes(b"x")
-    code = assets.main([str(tmp_path / "out"), "--msi", str(msi_dir), "--dmg", str(dmg_dir), "--tag", "v0.1.0"])
+    source, scripts = scripts_and_source(tmp_path)
+    args = [str(tmp_path / "out"), "--msi", str(msi_dir), "--dmg", str(dmg_dir), "--source", str(source)]
+    code = assets.main([*args, "--scripts", str(scripts), "--tag", "v0.1.0"])
     assert code == 1
 
 
@@ -161,3 +197,54 @@ def test_check_only_needs_no_installers(assets: ModuleType, capsys: pytest.Captu
     assert assets.main(["--check-only", "--tag", f"v{version}"]) == 0
     assert assets.main(["--check-only", "--tag", "v99.0.0"]) == 1
     assert "v99.0.0" in capsys.readouterr().err
+
+
+# ---- B019: the install command's files, beside the installers -------------------------------------------------------
+
+
+def test_the_source_zip_and_the_stamped_scripts_are_published(assets: ModuleType, tmp_path: Path) -> None:
+    code, out = run(assets, tmp_path)
+    assert code == 0
+    assert (out / "Clean-Voice-source.zip").read_bytes() == SOURCE
+    expected = f"v={VERSION} h={hashlib.sha256(SOURCE).hexdigest()}\n"
+    assert (out / "install.ps1").read_text(encoding="ascii") == expected
+    assert (out / "install.sh").read_text(encoding="ascii") == expected
+    assert b"\r" not in (out / "install.sh").read_bytes()
+
+
+def test_without_installers_only_the_commands_files_are_written(assets: ModuleType, tmp_path: Path) -> None:
+    source, scripts = scripts_and_source(tmp_path)
+    out = tmp_path / "release"
+    args = [str(out), "--source", str(source), "--scripts", str(scripts), "--tag", f"v{VERSION}", "--version", VERSION]
+    assert assets.main(args) == 0
+    assert sorted(p.name for p in out.iterdir()) == ["Clean-Voice-source.zip", "install.ps1", "install.sh"]
+
+
+def test_msi_without_dmg_is_refused(assets: ModuleType, tmp_path: Path) -> None:
+    msi_dir, _ = built(tmp_path)
+    source, scripts = scripts_and_source(tmp_path)
+    out = tmp_path / "release"
+    args = [str(out), "--msi", str(msi_dir), "--source", str(source), "--scripts", str(scripts)]
+    assert assets.main([*args, "--tag", f"v{VERSION}", "--version", VERSION]) == 1
+    assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["no placeholders\n", "only @@VERSION@@\n", "@@VERSION@@ @@VERSION@@ @@SOURCE_SHA256@@\n"],
+)
+def test_a_missing_or_repeated_placeholder_fails(assets: ModuleType, tmp_path: Path, text: str) -> None:
+    code, out = run(assets, tmp_path, sh=text)
+    assert code == 1
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("suffix", [".msi", ".dmg"])
+def test_an_installer_is_refused_as_the_source(assets: ModuleType, tmp_path: Path, suffix: str) -> None:
+    source, scripts = scripts_and_source(tmp_path)
+    installer = source.with_suffix(suffix)
+    installer.write_bytes(SOURCE)
+    out = tmp_path / "out"
+    args = [str(out), "--source", str(installer), "--scripts", str(scripts), "--tag", f"v{VERSION}"]
+    assert assets.main([*args, "--version", VERSION]) == 1
+    assert not out.exists()

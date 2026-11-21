@@ -24,7 +24,7 @@ reaches your call. It's free, made for podcast guests, and needs no audio know-h
 
 1. **Install VB-CABLE.** It's a free virtual cable from VB-Audio that carries your clean voice into the call app.
    [Download VB-CABLE](https://vb-audio.com/Cable/), install it, then restart your computer.
-2. **Install Clean Voice** with the button above for your computer, then open it and pick your microphone.
+2. **Install Clean Voice** one of the [two ways below](#install-clean-voice), then open it and pick your microphone.
 3. **In your call app** (Google Meet, Zoom, Discord or Teams), choose this as your microphone:
    - **CABLE Output** on Windows
    - **VB-Cable** on Mac
@@ -32,6 +32,43 @@ reaches your call. It's free, made for podcast guests, and needs no audio know-h
    Then turn off the call app's own noise cancellation: Clean Voice already handles it.
 
 That's it. If Clean Voice's headline says **"Your call hears your clean voice"**, you're ready.
+
+## Install Clean Voice
+
+There are two ways. Both give you the same app.
+
+### Way 1: download the installer
+
+> [!IMPORTANT]
+> **On Windows, first turn off Smart App Control.** Clean Voice is safe, free, and its code is public, right here.
+> Windows blocks it only because it isn't signed. Signing costs a monthly fee to Microsoft, which this free app
+> doesn't pay.
+>
+> Open **Start → Windows Security → App & browser control → Smart App Control settings** and choose **Off**.
+
+Then download the installer for your computer with the buttons at the top of this page, open it and follow its steps.
+Your computer may warn you the first time you open Clean Voice: see [the first-launch warning](#the-first-launch-warning).
+
+### Way 2: install with one command
+
+This builds Clean Voice on your own computer. It takes about 10 minutes. If it stops, run the same command again.
+
+**Windows:** right-click the **Start** button and choose **Terminal**. Paste this and press **Enter**:
+
+```powershell
+irm https://github.com/paulcaesarflores/clean-voice/releases/latest/download/install.ps1 | iex
+```
+
+**Mac:** open **Terminal** (Applications → Utilities). Paste this and press **Return**:
+
+```bash
+curl -fsSL https://github.com/paulcaesarflores/clean-voice/releases/latest/download/install.sh | bash
+```
+
+A Mac without Apple's developer tools asks to install them first: click **Install**, and the command carries on when
+they're done.
+
+Clean Voice opens when it's ready. To remove it on Windows, use **Settings → Apps → Installed apps**, as for any app.
 
 ## What it does
 
@@ -69,6 +106,8 @@ Clean Voice works with any app that lets you pick a microphone.
 Clean Voice is free and isn't signed with a paid certificate, so your computer warns you the first time you open it.
 This is expected:
 
+- **Windows Smart App Control:** if Windows blocks Clean Voice, turn Smart App Control off as in
+  [Way 1](#way-1-download-the-installer). It blocks every unsigned app, however it was installed.
 - **Windows:** if you see "Windows protected your PC", click **More info**, then **Run anyway**.
 - **Mac:** if you see "Clean Voice can't be opened", open **System Settings → Privacy & Security**, scroll down
   and click **Open Anyway**.
@@ -101,7 +140,9 @@ py -3.12 -m venv .venv
 
 On a Mac, use `python3.12 -m venv .venv` and `.venv/bin/python` instead.
 
-- `.github/workflows/` builds and checks the Windows MSI and macOS DMG.
+- `.github/workflows/` builds and checks the Windows MSI and macOS DMG, and runs the install command on Windows and
+  macOS.
+- `tools/install/` holds the install command's scripts.
 - A release is made by pushing a `v*` tag.
 
 ## Credits and licence

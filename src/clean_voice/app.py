@@ -16,6 +16,7 @@ import importlib
 import itertools
 import logging
 import math
+import os
 import re
 import subprocess
 import sys
@@ -949,7 +950,13 @@ CHECKING = "Checking for updates…"
 class UpdateController(QObject):
     """Check for updates and Install update. The network and the download run on a worker thread (``run``); their
     results come back to the UI thread through queued signals. Nothing installs without the guest's click on Install
-    update."""
+    update.
+
+    Install update follows how this copy was installed (``via_command``, B019): an app the install command installed
+    opens that command in a visible terminal window and keeps running; a timer reads the script's status file once a
+    second (``poll``): ``swap`` quits the app (the normal quit, so a recording is finished), ``failed`` returns to the
+    offer with a plain line. No OBS source for that status-file handshake: the user approved it. An app the installer
+    (MSI or DMG) installed downloads the installer, checks it and starts it, then quits."""
 
     changed = Signal()
     _checked = Signal(object)  # CheckResult
@@ -966,10 +973,15 @@ class UpdateController(QObject):
         run: Callable[[Callable[[], None]], None] | None = None,
         launch: Callable[[list[str]], object] | None = None,
         parent: QObject | None = None,
+        via_command: bool | None = None,
+        terminal: Callable[[updates.LaunchSpec], object] | None = None,
+        pid: int | None = None,
+        new_folder: Callable[[], Path] | None = None,
     ) -> None:
         super().__init__(parent)
         self.current, self.repo, self.platform = current, repo, platform
-        self.state = "idle"  # idle, checking, latest, newer, failed, confirm, downloading, install-failed
+        # idle, checking, latest, newer, failed, confirm, downloading, installing, install-failed
+        self.state = "idle"
         self.message = ""
         self.fraction = 0.0
         self.result: updates.CheckResult | None = None
@@ -978,6 +990,18 @@ class UpdateController(QObject):
         self._opener = opener
         self._run = run or (lambda job: threading.Thread(target=job, name="clean-voice-update", daemon=True).start())
         self._launch = launch or (lambda command: subprocess.Popen(command))  # an argument list, no shell
+        if via_command is None:
+            via_command = updates.installed_by_command(platform, autostart.current_command()[0])
+        self.via_command = via_command
+        self._terminal = terminal or updates.start_terminal
+        self._pid = os.getpid() if pid is None else pid
+        self._new_folder = new_folder or updates.fresh_folder
+        self._folder: Path | None = None  # this attempt's status folder; a new one every attempt
+        self._process: Any = None  # the Windows console's process (None on a Mac: ``open`` returns at once)
+        self._quit_called = False
+        self._timer = QTimer(self)
+        self._timer.setInterval(1000)
+        self._timer.timeout.connect(self.poll)
         self._checked.connect(self._on_checked)
         self._progress.connect(self._on_progress)
         self._downloaded.connect(self._on_downloaded)
@@ -986,11 +1010,18 @@ class UpdateController(QObject):
         self.state, self.message = state, message
         self.changed.emit()
 
+    def _stop_watching(self) -> None:
+        self._timer.stop()
+        self._folder = None
+        self._process = None
+
     def check(self, quiet: bool = False) -> None:
         """Ask for the latest release. ``quiet`` (the launch check) shows only an update, never "latest" or a
-        failure."""
-        if self.state in ("checking", "downloading"):
+        failure. A guest's own check while a command update is running clears the "installing" line (a Mac terminal
+        closed by hand leaves no status to say so)."""
+        if self.state in ("checking", "downloading") or (quiet and self.state == "installing"):
             return
+        self._stop_watching()
         self._quiet = quiet
         if not quiet:
             self._set("checking", CHECKING)
@@ -1016,16 +1047,16 @@ class UpdateController(QObject):
         self._set(result.state, result.message)
 
     def confirm(self) -> None:
-        """Install update's first click: say that Clean Voice will close, with Install and Cancel."""
+        """Install update's first click: say what will happen, with Install and Cancel."""
         if self.result is not None and self.result.installable and self.state in ("newer", "install-failed"):
-            self._set("confirm", updates.CONFIRM)
+            self._set("confirm", updates.CONFIRM_COMMAND if self.via_command else updates.CONFIRM)
 
     def cancel(self) -> None:
         if self.state == "confirm" and self.result is not None:
             self._set("newer", self.result.message)
 
     def primary(self) -> None:
-        """The install button: Install update asks first; Install (after the question) downloads and installs."""
+        """The install button: Install update asks first; Install (after the question) starts the update."""
         if self.state == "confirm":
             self.install()
         else:
@@ -1035,6 +1066,9 @@ class UpdateController(QObject):
         result = self.result
         if result is None or not result.installable or self.state != "confirm":
             return  # never without the guest's Install after the question
+        if self.via_command:
+            self._install_by_command()
+            return
         self.fraction = 0.0
         self._set("downloading", result.message)
         folder = Path(tempfile.mkdtemp(prefix="clean-voice-update-"))
@@ -1069,6 +1103,37 @@ class UpdateController(QObject):
             self._set("install-failed", "Couldn't start the installer. Try again later.")
             return
         self._quit()  # the installer replaces the app; Clean Voice must not be running
+
+    def _install_by_command(self) -> None:
+        if self.repo is None:
+            return
+        try:
+            folder = self._new_folder()
+            process = self._terminal(updates.launch_spec(self.repo, self.platform, self._pid, folder))
+        except Exception:
+            log.exception("could not open the update window")
+            self._set("install-failed", updates.LAUNCH_FAILED)
+            return
+        self._folder = folder
+        self._process = process if self.platform == "win32" else None
+        self._set("installing", updates.INSTALLING)
+        self._timer.start()
+
+    def poll(self) -> None:
+        """Read the status file (the timer calls this once a second)."""
+        if self.state != "installing" or self._folder is None:
+            return
+        status = updates.read_status(self._folder)
+        if status == updates.STATUS_SWAP:
+            self._timer.stop()
+            if not self._quit_called:
+                self._quit_called = True
+                self._quit()  # the existing quit path: a running recording is finished, as on any quit
+            return
+        ended = self._process is not None and self._process.poll() is not None
+        if status == updates.STATUS_FAILED or (not status and ended):
+            self._stop_watching()
+            self._set("newer", updates.UPDATE_FAILED)
 
 
 class UpdateView(QWidget):

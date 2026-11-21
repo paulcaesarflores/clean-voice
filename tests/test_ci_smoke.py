@@ -157,3 +157,120 @@ def test_wrong_machine_is_refused(smoke: ModuleType) -> None:
     smoke.check_arch("arm64", machine="arm64")
     with pytest.raises(smoke.SmokeError, match="x86_64"):
         smoke.check_arch("arm64", machine="x86_64")
+
+
+# ---- tools/ci/smoke_install.py (B019): the pure parts; the real run is CI's ---------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def install_smoke() -> ModuleType:
+    ci = str(ROOT / "tools" / "ci")
+    sys.path.insert(0, ci)  # smoke_install loads its siblings by file, but never hurts to have them importable
+    try:
+        spec = importlib.util.spec_from_file_location("smoke_install", ROOT / "tools" / "ci" / "smoke_install.py")
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        sys.path.remove(ci)
+
+
+def test_the_local_command_is_the_guests_command_with_another_base(install_smoke: ModuleType) -> None:
+    from clean_voice import updates
+
+    repo = "paulcaesarflores/clean-voice"
+    real_base = f"https://github.com/{repo}/releases/latest/download"
+    for platform, app_platform in (("windows", "win32"), ("macos", "darwin")):
+        local = install_smoke.local_command(platform, "http://127.0.0.1:1234")
+        assert local.replace("http://127.0.0.1:1234", real_base) == updates.install_command_text(repo, app_platform)
+
+
+def test_the_command_runs_with_no_python_and_no_git_on_path(install_smoke: ModuleType) -> None:
+    env = install_smoke.stripped_env(
+        "windows", "http://127.0.0.1:1", {"Path": r"C:\Python312;C:\Git\cmd", "CLEAN_VOICE_UPDATE": "1", "TEMP": "x"}
+    )
+    assert env["PATH"] == install_smoke.WINDOWS_PATH and "Path" not in env
+    assert "python" not in env["PATH"].lower() and "git" not in env["PATH"].lower()
+    assert env["CLEAN_VOICE_BASE"] == "http://127.0.0.1:1" and "CLEAN_VOICE_UPDATE" not in env and env["TEMP"] == "x"
+    assert install_smoke.stripped_env("macos", "b", {"PATH": "/opt/homebrew/bin"})["PATH"] == install_smoke.MAC_PATH
+    argv = install_smoke.command_argv("windows", "http://h")
+    assert argv[0].lower().endswith("powershell.exe") and argv[1:3] == ["-NoProfile", "-Command"]
+    assert argv[3] == "irm http://h/install.ps1 | iex"
+    assert install_smoke.command_argv("macos", "http://h")[1:] == ["-c", "curl -fsSL http://h/install.sh | bash"]
+
+
+def test_the_local_server_answers_every_file_as_octet_stream(install_smoke: ModuleType, tmp_path: Path) -> None:
+    import socket
+
+    (tmp_path / "install.ps1").write_bytes(b"# a script" + bytes([10]))
+    (tmp_path / "page.html").write_text("<p>x</p>", encoding="ascii")
+    with install_smoke.serve(tmp_path) as base:
+        port = int(base.rsplit(":", 1)[1])
+        for name, body in (("install.ps1", b"# a script" + bytes([10])), ("page.html", b"<p>x</p>")):
+            # A raw loopback socket: the suite's no-network guard refuses urllib and socket.create_connection.
+            with socket.socket() as conn:
+                conn.settimeout(30)
+                conn.connect(("127.0.0.1", port))
+                crlf = bytes([13, 10])
+                conn.sendall(f"GET /{name} HTTP/1.0".encode("ascii") + crlf + b"Host: 127.0.0.1" + crlf + crlf)
+                data = b""
+                while chunk := conn.recv(4096):
+                    data += chunk
+            head, _, payload = data.partition(crlf + crlf)
+            assert b"content-type: application/octet-stream" in head.lower()
+            assert payload == body
+
+
+def test_registry_entry_judgement(install_smoke: ModuleType) -> None:
+    folder = r"C:\Users\x\AppData\Local\Programs\Clean Voice"
+    good = {
+        "DisplayName": "Clean Voice",
+        "Publisher": "Clean Voice",
+        "DisplayVersion": "0.3.0",
+        "InstallLocation": folder,
+        "DisplayIcon": folder + r"\Clean Voice.exe",
+        "UninstallString": rf'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{folder}\Uninstall Clean Voice.ps1"',
+    }
+    assert install_smoke.registry_problems(good, folder, "0.3.0") == []
+    assert len(install_smoke.registry_problems({**good, "Publisher": "Someone"}, folder, "0.3.0")) == 1
+    assert install_smoke.registry_problems({**good, "UninstallString": "msiexec /x"}, folder, "0.3.0")
+    assert install_smoke.registry_problems(good, folder, "0.4.0")
+
+
+def test_plist_and_run_value_judgement(install_smoke: ModuleType) -> None:
+    assert install_smoke.plist_problems({"LSAppNapIsDisabled": True, "CFBundleIconFile": "clean-voice"}) == []
+    assert len(install_smoke.plist_problems({"CFBundleIconFile": "clean-voice"})) == 1
+    exists = {r"C:\Apps\Clean Voice\Clean Voice.exe"}.__contains__
+    assert install_smoke.run_value_problem(r'"C:\Apps\Clean Voice\Clean Voice.exe" --minimized', exists) is None
+    assert "does not exist" in install_smoke.run_value_problem(r'"C:\Gone\Clean Voice.exe" --minimized', exists)
+    assert "gone" in install_smoke.run_value_problem(None, exists)
+
+
+def test_the_release_folder_is_built_from_git_archive(install_smoke: ModuleType, tmp_path: Path) -> None:
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None:
+        pytest.skip("git is needed")
+    project = tmp_path / "proj"
+    (project / "src" / "clean_voice").mkdir(parents=True)
+    (project / "tools" / "install").mkdir(parents=True)
+    (project / "pyproject.toml").write_text('[project]\nversion = "1.2.3"\n[tool.briefcase]\nversion = "1.2.3"\n')
+    (project / "src" / "clean_voice" / "__init__.py").write_text('__version__ = "1.2.3"\n')
+    for name in ("install.ps1", "install.sh"):
+        (project / "tools" / "install" / name).write_text("v=@@VERSION@@ h=@@SOURCE_SHA256@@\n", encoding="ascii")
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args], cwd=project, check=True
+        )
+
+    git("init", "-q")
+    git("add", ".")
+    git("commit", "-q", "-m", "x")
+    out = tmp_path / "release"
+    assert install_smoke.build_release(out, project) == "v1.2.3"
+    assert sorted(p.name for p in out.iterdir()) == ["Clean-Voice-source.zip", "install.ps1", "install.sh"]
+    assert (out / "install.ps1").read_text(encoding="ascii").startswith("v=1.2.3 h=")

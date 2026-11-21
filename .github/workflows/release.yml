@@ -1,7 +1,9 @@
-# Clean Voice release: on a pushed tag vX.Y.Z, the tag is checked against the app version, then the whole CI workflow
-# runs (checks, the MSI, the universal DMG and every launch check, Intel included), then a GitHub Release is made with
-# the installers under stable names, so releases/latest/download/Clean-Voice-Windows.msi (and -macOS.dmg) are
-# permanent links. The checksum files are the ones the in-app updater verifies (src/clean_voice/updates.py).
+# Clean Voice release (B019): on a pushed tag vX.Y.Z, the tag is checked against the app version, then the whole CI workflow
+# runs (checks, the MSI and the universal DMG with their launch checks, Intel included, and the install command run for
+# real on Windows and both Macs), then a GitHub Release is made under stable names, so releases/latest/download/<name> is
+# a permanent link: the installers and their checksum files (the in-app updater verifies them), the source zip (git
+# archive of the tag) and the two install scripts, stamped with the version and the zip's SHA-256. Last, the download
+# page is deployed: only after the release exists, so the page never shows a link whose file is not there yet.
 name: Release
 
 on:
@@ -38,9 +40,10 @@ jobs:
     needs: tag
     uses: ./.github/workflows/ci.yml
 
+  # macOS so git archive and the stamped scripts keep Unix line endings (install.sh runs under bash).
   release:
     needs: ci
-    runs-on: windows-latest
+    runs-on: macos-latest
     timeout-minutes: 15
     permissions:
       contents: write
@@ -60,11 +63,26 @@ jobs:
         with:
           name: clean-voice-macos-dmg
           path: artifacts/dmg
-      - name: Stable names and checksums
-        run: python tools/ci/release_assets.py release --msi artifacts/msi --dmg artifacts/dmg --tag "$GITHUB_REF_NAME"
+      - name: Source archive of the tag
+        run: git archive --format=zip -o Clean-Voice-source.zip "$GITHUB_REF_NAME"
+      - name: Stable names, checksums and stamped scripts
+        run: >-
+          python tools/ci/release_assets.py release --msi artifacts/msi --dmg artifacts/dmg
+          --source Clean-Voice-source.zip --tag "$GITHUB_REF_NAME"
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh release create "$GITHUB_REF_NAME" release/*
           --repo "$GITHUB_REPOSITORY" --title "Clean Voice $GITHUB_REF_NAME" --generate-notes --verify-tag
+
+  # A release made with GITHUB_TOKEN does not trigger a `release: published` workflow (GitHub docs, "Triggering a
+  # workflow"), so the page is deployed by an explicit call. A called workflow cannot hold more permissions than its
+  # caller job, so the job grants the three that pages.yml's deploy job asks for.
+  pages:
+    needs: release
+    uses: ./.github/workflows/pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write

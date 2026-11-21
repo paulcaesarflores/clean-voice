@@ -1,6 +1,6 @@
 /* Clean Voice's download page: picks the button for the visitor's computer and builds every GitHub link from the
-   page's own address. No libraries, no cookies, nothing is sent anywhere. Without this script both buttons show and
-   the links in the HTML (the fallback repo below) still work. Tested by tests/test_download_page.py. */
+   page's own address, and the install commands. No libraries, no cookies, nothing is sent anywhere. Without this script
+   both computers' options show and the links and commands in the HTML (the fallback repo below) still work. Tested by tests/test_download_page.py. */
 (function (root) {
   "use strict";
 
@@ -9,6 +9,9 @@
   var FALLBACK_REPO = "paulcaesarflores/clean-voice";
 
   var FILES = { windows: "Clean-Voice-Windows.msi", mac: "Clean-Voice-macOS.dmg" };
+
+  // The release's install scripts (tools/ci/release_assets.py SCRIPT_NAMES): the command fetches the one for the OS.
+  var SCRIPTS = { windows: "install.ps1", mac: "install.sh" };
 
   // Read from the user agent text when the browser has no userAgentData. First match wins: phones and tablets come
   // first, because iPhone user agents say "like Mac OS X" and Android ones say "Linux".
@@ -77,11 +80,28 @@
     };
   }
 
-  /* Sets every [data-link] address, every [data-cable] name, the [data-shot] screenshot and the page's data-os,
+  /* The command to paste: PowerShell's irm | iex on Windows, curl | bash on a Mac. The same text as
+     clean_voice.updates.install_command_text (tests/test_download_page.py), which Install update runs. */
+  function commands(repo) {
+    var base = "https://github.com/" + repo + "/releases/latest/download/";
+    return {
+      windows: "irm " + base + SCRIPTS.windows + " | iex",
+      mac: "curl -fsSL " + base + SCRIPTS.mac + " | bash"
+    };
+  }
+
+  /* Sets every [data-link] address, every [data-command] text, every [data-cable] name, the [data-shot] screenshot and the page's data-os,
      which the style sheet reads. */
   function apply(doc, nav, loc) {
     var os = detectOS(nav.userAgentData, nav.userAgent, nav.maxTouchPoints);
-    var urls = links(repoFromLocation(loc.hostname, loc.pathname));
+    var repo = repoFromLocation(loc.hostname, loc.pathname);
+    var urls = links(repo);
+    var texts = commands(repo);
+    var boxes = doc.querySelectorAll("[data-command]");
+    for (var c = 0; c < boxes.length; c++) {
+      var text = texts[boxes[c].getAttribute("data-command")];
+      if (text) boxes[c].textContent = text;
+    }
     var anchors = doc.querySelectorAll("[data-link]");
     for (var i = 0; i < anchors.length; i++) {
       var url = urls[anchors[i].getAttribute("data-link")];
@@ -99,18 +119,67 @@
     doc.documentElement.setAttribute("data-os", os);
   }
 
+  /* The Copy button: puts the command on the clipboard and says "Copied" for a moment. Without a clipboard API (an old
+     browser, a local file) it selects the command so Ctrl+C or Cmd+C finishes the job. */
+  function copyCommand(nav, text, done, fail) {
+    if (nav.clipboard && nav.clipboard.writeText) {
+      nav.clipboard.writeText(text).then(done, fail);
+    } else {
+      fail();
+    }
+  }
+
+  /* Wires the buttons (a real page only): Copy, and "Show the Mac/Windows options", which swaps the block shown. */
+  function wire(doc, nav, loc) {
+    var copy = function (button) {
+      button.addEventListener("click", function () {
+        var box = doc.querySelector('[data-command="' + button.getAttribute("data-copy") + '"]');
+        var label = button.textContent;
+        var restore = function () { button.textContent = label; };
+        copyCommand(nav, box.textContent, function () {
+          button.textContent = "Copied";
+          setTimeout(restore, 2000);
+        }, function () {
+          var range = doc.createRange();
+          range.selectNodeContents(box);
+          var selection = doc.defaultView.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          button.textContent = "Press Ctrl+C";
+          setTimeout(restore, 3000);
+        });
+      });
+    };
+    var copies = doc.querySelectorAll("[data-copy]");
+    for (var i = 0; i < copies.length; i++) copy(copies[i]);
+    var show = function (link) {
+      link.addEventListener("click", function (event) {
+        event.preventDefault();
+        var os = link.getAttribute("data-show");
+        var data = { platform: os === "mac" ? "macOS" : "Windows", mobile: false };
+        apply(doc, { userAgentData: data, userAgent: "", maxTouchPoints: 0 }, loc);
+      });
+    };
+    var shows = doc.querySelectorAll("[data-show]");
+    for (var j = 0; j < shows.length; j++) show(shows[j]);
+  }
+
   root.CleanVoiceDownload = {
     FALLBACK_REPO: FALLBACK_REPO,
     FILES: FILES,
+    SCRIPTS: SCRIPTS,
     CABLE_MIC: CABLE_MIC,
     SHOTS: SHOTS,
     detectOS: detectOS,
     repoFromLocation: repoFromLocation,
     links: links,
+    commands: commands,
+    copyCommand: copyCommand,
     apply: apply
   };
 
   if (typeof document !== "undefined") {
     apply(document, navigator, location);
+    wire(document, navigator, location);
   }
 })(this);

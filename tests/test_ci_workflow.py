@@ -97,7 +97,15 @@ def test_actions_pinned_to_commit_sha(text: str) -> None:
 
 # W5
 def test_runners(jobs: dict[str, dict[str, Any]]) -> None:
-    assert set(jobs) == {"checks", "package-windows", "package-macos", "smoke-macos-intel"}
+    # The installer way (package-*, smoke-macos-intel) and, B019, the command way (install-*).
+    assert set(jobs) == {
+        "checks",
+        "package-windows",
+        "package-macos",
+        "smoke-macos-intel",
+        "install-windows",
+        "install-macos",
+    }
     checks = jobs["checks"]
     assert checks["strategy"]["fail-fast"] is False
     assert {entry["os"] for entry in checks["strategy"]["matrix"]["include"]} == {"windows-latest", "macos-latest"}
@@ -107,6 +115,13 @@ def test_runners(jobs: dict[str, dict[str, Any]]) -> None:
     intel = jobs["smoke-macos-intel"]
     assert intel["runs-on"] == "macos-15-intel"
     assert intel["needs"] in ("package-macos", ["package-macos"])
+    assert jobs["install-windows"]["runs-on"] == "windows-latest"
+    mac_install = jobs["install-macos"]
+    assert mac_install["runs-on"] == "${{ matrix.os }}"
+    assert {(e["os"], e["arch"]) for e in mac_install["strategy"]["matrix"]["include"]} == {
+        ("macos-latest", "arm64"),
+        ("macos-15-intel", "x86_64"),
+    }
     for name, job in jobs.items():
         # Windows and macOS only (DESIGN, Platforms).
         assert "ubuntu" not in str(job["runs-on"]), f"job {name} runs on Linux"
@@ -247,3 +262,75 @@ def test_macos_checks_app_nap_is_disabled_in_the_built_info_plist(jobs: dict[str
     assert '"build/clean-voice/macos/app/Clean Voice.app/Contents/Info.plist"' in run
     assert '= "true"' in run
     assert step_index(job, "-m briefcase build macOS") < check
+
+
+# B019: the command way is run for real through tools/ci/smoke_install.py and keeps the log when it fails.
+@pytest.mark.parametrize(
+    ("job_name", "python", "commands"),
+    [
+        (
+            "install-windows",
+            ".venv/Scripts/python",
+            [
+                "tools/ci/smoke_install.py windows\n",
+                "tools/ci/smoke_install.py windows --from-old machine",
+                "tools/ci/smoke_install.py windows --from-old user",
+            ],
+        ),
+        (
+            "install-macos",
+            ".venv/bin/python",
+            [
+                "tools/ci/smoke_install.py macos --arch ${{ matrix.arch }}\n",
+                "tools/ci/smoke_install.py macos --arch ${{ matrix.arch }} --from-old machine",
+            ],
+        ),
+    ],
+)
+def test_install_jobs(jobs: dict[str, dict[str, Any]], job_name: str, python: str, commands: list[str]) -> None:
+    job = jobs[job_name]
+    joined = "\n".join(run_lines(job)) + "\n"
+    for command in commands:
+        assert f"{python} {command}" in joined, f"{job_name} lacks {command!r}"
+    uploads = uses_steps(job, "actions/upload-artifact")
+    assert len(uploads) == 1 and uploads[0]["if"] == "failure()"
+    assert "briefcase" not in "\n".join(run_lines(job))  # Briefcase is run by the install scripts, not by CI
+
+
+def test_the_install_checks_cover_launch_icon_and_the_old_copy() -> None:
+    tool = (ROOT / "tools" / "ci" / "smoke_install.py").read_text(encoding="utf-8")
+    needles = (
+        "check_app(",
+        "check_icons.py",
+        "LSAppNapIsDisabled",
+        "codesign",
+        "lipo",
+        "UninstallString",
+        "--from-old",
+    )
+    for needle in needles:
+        assert needle in tool, needle
+    assert "--arch" in tool and "check_arch" in tool  # the Intel job refuses another CPU
+
+
+def test_the_install_script_stamps_the_copyright_between_build_and_install() -> None:
+    # J10 Step 13, for the command way: install.ps1 stamps LICENSE's line in after the build, before the app moves.
+    script = (ROOT / "tools" / "install" / "install.ps1").read_text(encoding="ascii")
+    build = script.index("'build', 'windows', '--no-input'")
+    stamp = script.index("set_copyright.py")
+    assert build < stamp < script.index("Invoke-CvSwap $Cx $msi")
+
+
+def test_shell_tests_must_run_in_ci(jobs: dict[str, dict[str, Any]]) -> None:
+    # The install scripts' tests skip inside a Claude session; in CI a skip is a failure (tests/shell_env.py).
+    tests = next(s for s in steps(jobs["checks"]) if s.get("name") == "Tests")
+    assert tests["env"] == {"CLEAN_VOICE_REQUIRE_SHELL_TESTS": "1"}
+
+
+def test_the_install_job_signs_and_strictly_verifies_the_rnnoise_dylib_before_the_install(
+    jobs: dict[str, dict[str, Any]],
+) -> None:
+    job = jobs["install-macos"]
+    check = step_index(job, "codesign --verify --strict")
+    assert "src/clean_voice/native/librnnoise.dylib" in steps(job)[check]["run"]
+    assert check < step_index(job, "tools/ci/smoke_install.py")

@@ -60,7 +60,7 @@ def test_release_runs_all_of_ci_then_publishes() -> None:
     _, workflow = load("release.yml")
     assert triggers(workflow) == {"push": {"tags": ["v*"]}}
     jobs = workflow["jobs"]
-    assert set(jobs) == {"tag", "ci", "release"}
+    assert set(jobs) == {"tag", "ci", "release", "pages"}
     # Release r1, m5: the tag is checked against the app version first, so a mistyped tag fails in seconds.
     tag = jobs["tag"]
     assert "needs" not in tag
@@ -79,6 +79,9 @@ def test_release_runs_all_of_ci_then_publishes() -> None:
     prepare = f"tools/ci/release_assets.py release --msi {downloads['clean-voice-windows-msi']}"
     assert prepare in commands
     assert f"--dmg {downloads['clean-voice-macos-dmg']}" in commands
+    # B019: the source zip and the two stamped install scripts are published beside the installers.
+    assert 'git archive --format=zip -o Clean-Voice-source.zip "$GITHUB_REF_NAME"' in commands
+    assert "--source Clean-Voice-source.zip" in commands
     assert '--tag "$GITHUB_REF_NAME"' in commands
     assert re.search(r'gh release create "\$GITHUB_REF_NAME" release/\*', commands)
     assert "--verify-tag" in commands
@@ -89,14 +92,32 @@ def test_ci_is_callable() -> None:
     assert "workflow_call" in triggers(ci)
 
 
-def test_pages_publishes_docs_site_from_main() -> None:
+def test_pages_is_deployed_only_after_the_release_exists() -> None:
+    # B019-1: the page links files of the release. A release made with GITHUB_TOKEN does not trigger a
+    # `release: published` workflow, so release.yml calls pages.yml itself, once the release job is done.
+    _, release = load("release.yml")
+    pages = release["jobs"]["pages"]
+    assert pages["needs"] in ("release", ["release"])
+    assert pages["uses"] == "./.github/workflows/pages.yml"
     _, workflow = load("pages.yml")
     on = triggers(workflow)
-    assert on["push"] == {"branches": ["main"]}
-    assert set(on) <= {"push", "workflow_dispatch"}
+    assert set(on) == {"workflow_call", "workflow_dispatch"}  # no push trigger: never before the release
     (job,) = workflow["jobs"].values()
     assert job["permissions"] == {"contents": "read", "pages": "write", "id-token": "write"}
     assert job["environment"]["name"] == "github-pages"
     (upload,) = steps_with(job, "actions/upload-pages-artifact")
     assert upload["with"]["path"] == "docs/site"
     assert len(steps_with(job, "actions/deploy-pages")) == 1
+
+
+def test_the_pages_caller_grants_every_permission_the_called_workflow_asks_for() -> None:
+    # B019-10: a called workflow cannot hold more than its caller job; without these grants the release run fails at startup.
+    _, release = load("release.yml")
+    _, pages = load("pages.yml")
+    granted = release["jobs"]["pages"]["permissions"]
+    for job in pages["jobs"].values():
+        for permission, level in job.get("permissions", {}).items():
+            assert granted.get(permission) == level, (
+                f"the pages job in release.yml does not grant {permission}: {level}"
+            )
+    assert set(granted) == {"contents", "pages", "id-token"}

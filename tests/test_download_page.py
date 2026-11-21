@@ -362,3 +362,113 @@ def test_nothing_loads_from_elsewhere(page: Page) -> None:
     for url in re.findall(r"url\(([^)]*)\)", css):
         url = url.strip("'\"")
         assert (SITE / url).is_file(), url
+
+
+# ---- B019: the page offers two ways, the installer first and the command second -----------------------------------------
+
+
+def test_the_commands_are_the_ones_the_app_runs(engine: QJSEngine) -> None:
+    from clean_voice import updates
+
+    commands = call(engine, 'CleanVoiceDownload.commands("someone/clean-voice")')
+    assert commands == {
+        "windows": updates.install_command_text("someone/clean-voice", "win32"),
+        "mac": updates.install_command_text("someone/clean-voice", "darwin"),
+    }
+    # The scripts the commands fetch are the ones the release workflow uploads (tools/ci/release_assets.py).
+    script = (ROOT / "tools" / "ci" / "release_assets.py").read_text(encoding="utf-8")
+    assert 'SCRIPT_NAMES = ("install.ps1", "install.sh")' in script
+    assert call(engine, "CleanVoiceDownload.SCRIPTS") == {"windows": "install.ps1", "mac": "install.sh"}
+
+
+def test_without_javascript_both_ways_show_and_the_commands_are_right(engine: QJSEngine, page: Page) -> None:
+    commands = call(engine, f"CleanVoiceDownload.commands({json.dumps(homepage_repo())})")
+    assert isinstance(commands, dict)
+    html = (SITE / "index.html").read_text(encoding="utf-8")
+    for os_name, command in commands.items():
+        assert f'<code class="command" data-command="{os_name}">{command}</code>' in html
+    blocks = [attrs for tag, attrs in page.tags if tag == "div" and attrs.get("data-os-target")]
+    assert {attrs["data-os-target"] for attrs in blocks} == {"windows", "mac"}
+    copies = [attrs for tag, attrs in page.tags if tag == "button" and "data-copy" in attrs]
+    assert {attrs["data-copy"] for attrs in copies} == {"windows", "mac"}
+
+
+def test_the_installer_comes_first_then_the_command_and_no_badge() -> None:
+    html = " ".join((SITE / "index.html").read_text(encoding="utf-8").split())
+    for os_name in ("windows", "mac"):
+        block = html[html.index(f'data-os-target="{os_name}"') :]
+        way1, way2 = block.index("Way 1: download the installer"), block.index("Way 2: install with one command")
+        assert (
+            way1 < block.index("Download for") < block.index('role="separator"') < way2 < block.index("data-command=")
+        )
+    assert "recommended" not in html.lower()
+
+
+def test_the_mockup_texts_are_on_the_page() -> None:
+    html = " ".join((SITE / "index.html").read_text(encoding="utf-8").split())
+    for text in (
+        "First, turn off Smart App Control",
+        "Clean Voice is safe, free, and its code is public. Windows blocks it only because it isn't signed.",
+        "Signing costs a monthly fee to Microsoft, which this free app doesn't pay.",
+        "Open Start, then Windows Security, then App and browser control, then Smart App Control settings, and choose Off.",
+        "Download for Windows",
+        "Windows 10 or 11",
+        "Click Copy.",
+        "Right-click the Start button and choose Terminal.",
+        "Paste with Ctrl+V and press Enter. It takes about 10 minutes, then Clean Voice opens.",
+        "If it stops, run the same command again.",
+        "On a Mac? <a",
+        "Show the Mac options",
+        "Download for Mac",
+        "Open System Settings → Privacy &amp; Security, scroll down and click <em>Open Anyway</em>.",
+        "Applications → Utilities → Terminal",
+        "Paste with Cmd+V and press Enter.",
+        "Install Clean Voice one of the two ways above",
+    ):
+        assert text in html, text
+    # B019-4: "Windows or Mac warns you?" stays until a real PC run shows no warning, unchanged.
+    assert '<h2 id="warn-title">Windows or Mac warns you?</h2>' in html
+    assert "click <em>More info</em>, then <em>Run anyway</em>" in html
+    # B019-7: one line says what the command downloads.
+    assert "downloads Python packages from PyPI" in html
+
+
+def test_apply_fills_each_command_from_the_pages_own_address(engine: QJSEngine) -> None:
+    program = """(function () {
+      var boxes = [{ textContent: "", attrs: { "data-command": "windows" } },
+                   { textContent: "", attrs: { "data-command": "mac" } }];
+      boxes.forEach(function (b) { b.getAttribute = function (k) { return this.attrs[k]; }; });
+      var doc = { documentElement: { setAttribute: function () {} },
+                  querySelectorAll: function (sel) { return sel === "[data-command]" ? boxes : []; } };
+      CleanVoiceDownload.apply(doc, { userAgentData: null, userAgent: "", maxTouchPoints: 0 },
+                               { hostname: "someone.github.io", pathname: "/clean-voice/" });
+      return boxes.map(function (b) { return b.textContent; });
+    })()"""
+    assert call(engine, program) == [
+        "irm https://github.com/someone/clean-voice/releases/latest/download/install.ps1 | iex",
+        "curl -fsSL https://github.com/someone/clean-voice/releases/latest/download/install.sh | bash",
+    ]
+    css = (SITE / "style.css").read_text(encoding="utf-8")
+    assert 'html[data-os="windows"] .os-block[data-os-target="mac"]' in css
+    assert 'html[data-os="mac"] .os-block[data-os-target="windows"]' in css
+
+
+def test_copy_puts_the_command_on_the_clipboard(engine: QJSEngine) -> None:
+    program = """(function () {
+      var written = [], said = [];
+      var nav = { clipboard: { writeText: function (t) { written.push(t); return { then: function (ok) { ok(); } }; } } };
+      var ok = function () { said.push("copied"); }, no = function () { said.push("failed"); };
+      CleanVoiceDownload.copyCommand(nav, "irm x | iex", ok, no);
+      CleanVoiceDownload.copyCommand({}, "irm x | iex", ok, no);
+      return written.concat(said);
+    })()"""
+    assert call(engine, program) == ["irm x | iex", "copied", "failed"]
+
+
+def test_the_warning_note_is_readable_in_both_themes() -> None:
+    css = (SITE / "style.css").read_text(encoding="utf-8")
+    light, dark = css.split("@media (prefers-color-scheme: dark)", 1)
+    for theme in (light, dark.split("\n}\n", 1)[0]):
+        tokens = dict(re.findall(r"--([\w-]+):\s*(#[0-9A-Fa-f]{6})", theme))
+        assert _contrast(tokens["warn-ink"], tokens["warn-bg"]) >= 4.5, tokens
+        assert _contrast(tokens["ink"], tokens["warn-bg"]) >= 4.5, tokens

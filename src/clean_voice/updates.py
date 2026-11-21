@@ -11,6 +11,14 @@ Every address is HTTPS on GitHub's own hosts, redirects included, verified with 
 Python may have no certificates of its own). Asset names are matched after GitHub's renaming of spaces to dots, so a
 ``SHA256SUMS`` made before the upload still matches. Every failure, whatever raised it, ends in a plain message.
 
+B019 (2026-11-21): a guest installs one of two ways, the installer or the install command (the page's "Way 2").
+Install update follows how this copy was installed. An app the command installed (it leaves ``MARKER_NAME``) runs the
+same command in a visible terminal window, which rebuilds the new version while Clean Voice keeps running; the
+command's script reports through a one-word status file that the app reads (``swap``: the app may quit for the swap;
+``failed``). There is no OBS source for that handshake: the user approved it. Windows opens a new PowerShell console
+(``subprocess`` ``CREATE_NEW_CONSOLE``); a Mac opens a ``.command`` file in Terminal with Apple's ``open -a Terminal``.
+An app the installer installed keeps the download path above.
+
 Everything here runs off the UI thread; ``opener`` defaults to ``open_url``, and the tests replace it.
 """
 
@@ -18,8 +26,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shlex
 import ssl
+import subprocess
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -52,6 +64,23 @@ MISMATCH = "The download didn't match its published checksum, so nothing was ins
 NO_INSTALLER = "This release has no installer for this computer, so nothing was installed."
 UNSAFE = "That update didn't come from Clean Voice's release page, so nothing was installed."
 CONFIRM = "Clean Voice will close to install the update and you can open it again afterwards."
+CONFIRM_COMMAND = (
+    "Clean Voice will rebuild the new version in a terminal window (a few minutes), keep working meanwhile, "
+    "then close and open again."
+)
+INSTALLING = "Updating in the terminal window. Clean Voice stays open until the last moment."
+UPDATE_FAILED = "The update didn't work, so you still have the old Clean Voice. The window shows why."
+LAUNCH_FAILED = "Couldn't open the update window. Try again, or use the command on the download page."
+# The permanent-link form of a release file: the latest release's file of that name (docs/site/download.js links()).
+LATEST_DOWNLOAD = "https://github.com/{repo}/releases/latest/download/{name}"
+SCRIPTS = {"win32": "install.ps1", "darwin": "install.sh"}
+CREATE_NEW_CONSOLE = 0x00000010  # subprocess.CREATE_NEW_CONSOLE (Windows only; the constant is absent elsewhere)
+STATUS_SWAP = "swap"
+STATUS_FAILED = "failed"
+# What the install scripts leave so the app knows the command installed it. Windows: this file in the app's folder.
+# macOS: this file in Application Support holding the SHA-256 of the app's main binary (a file added inside the signed
+# bundle would break its signature), so a DMG copy installed over it no longer matches.
+MARKER_NAME = "installed-by-command"
 
 Opener = Callable[..., Any]
 
@@ -243,3 +272,101 @@ def install_command(path: Path, platform: str) -> list[str]:
     if platform == "darwin":
         return ["open", str(path)]
     raise UpdateError(NO_INSTALLER)
+
+
+# ------------------------------------------------------------------ the install command (B019)
+
+
+def installed_by_command(platform: str, exe: str | Path, home: Path | None = None) -> bool:
+    """True when the install command installed this copy (see ``MARKER_NAME``). ``exe`` is the running app's file."""
+    try:
+        path = Path(exe)
+        if platform == "win32":
+            return (path.parent / MARKER_NAME).is_file()
+        if platform == "darwin":
+            marker = (home or Path.home()) / "Library" / "Application Support" / "Clean Voice" / MARKER_NAME
+            return marker.read_text(encoding="ascii").strip() == hashlib.sha256(path.read_bytes()).hexdigest()
+    except (OSError, ValueError):
+        return False
+    return False
+
+
+def install_url(repo: str, platform: str) -> str:
+    """The release's install script for ``platform``, the permanent latest-download link."""
+    return LATEST_DOWNLOAD.format(repo=repo, name=SCRIPTS[platform])
+
+
+def install_command_text(repo: str, platform: str) -> str:
+    """The command the download page shows, and the one Install update runs: PowerShell's ``irm | iex`` on Windows,
+    ``curl | bash`` on a Mac. docs/site/download.js ``commands`` builds the same text (tests/test_download_page.py)."""
+    url = install_url(repo, platform)
+    if platform == "win32":
+        return f"irm {url} | iex"
+    return f"curl -fsSL {url} | bash"
+
+
+@dataclass(frozen=True)
+class LaunchSpec:
+    """What starts the terminal: the program and its arguments, its environment, the Windows creation flags."""
+
+    argv: list[str]
+    env: dict[str, str] | None
+    creationflags: int
+    script: Path | None  # the Mac's .command file (None on Windows)
+
+
+def powershell_exe() -> Path:
+    """Windows PowerShell 5.1 by its full System32 path, never a PATH lookup (what the install command is written for)."""
+    root = os.environ.get("SystemRoot", r"C:\Windows")
+    return Path(root) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+
+
+def update_env(pid: int, status_file: Path) -> dict[str, str]:
+    """The three variables the install scripts read in update mode (tools/install/install.ps1, install.sh)."""
+    return {
+        "CLEAN_VOICE_UPDATE": "1",
+        "CLEAN_VOICE_WAIT_PID": str(pid),
+        "CLEAN_VOICE_STATUS_FILE": str(status_file),
+    }
+
+
+def launch_spec(repo: str, platform: str, pid: int, folder: Path) -> LaunchSpec:
+    """The terminal launch for ``platform``; ``folder`` is a fresh folder that holds the status file (and, on a Mac,
+    the .command file). A Mac's file is mode 0700 so only this user can read or change what Terminal will run."""
+    if platform not in SCRIPTS:
+        raise OSError(f"Install update does not support {platform}")
+    status = folder / "status"
+    command = install_command_text(repo, platform)
+    variables = update_env(pid, status)
+    if platform == "win32":
+        argv = [str(powershell_exe()), "-NoProfile", "-Command", command]
+        return LaunchSpec(argv, {**os.environ, **variables}, CREATE_NEW_CONSOLE, None)
+    script = folder / "Clean Voice Update.command"
+    lines = ["#!/bin/bash", *(f"export {k}={shlex.quote(v)}" for k, v in variables.items()), command, ""]
+    script.write_text("\n".join(lines), encoding="utf-8")
+    script.chmod(0o700)
+    return LaunchSpec(["open", "-a", "Terminal", str(script)], None, 0, script)
+
+
+def start_terminal(spec: LaunchSpec) -> subprocess.Popen[bytes] | None:
+    """Start the terminal. Windows: the new console's process, which the app watches. A Mac: ``open`` returns at once,
+    so a non-zero exit is the failure; there is no process to watch."""
+    if spec.script is None:
+        return subprocess.Popen(spec.argv, env=spec.env, creationflags=spec.creationflags)  # an argument list, no shell
+    done = subprocess.run(spec.argv, check=False)
+    if done.returncode != 0:
+        raise OSError(f"open exited {done.returncode}")
+    return None
+
+
+def fresh_folder() -> Path:
+    """A new folder for one attempt, so an old ``failed`` is never read by the next attempt."""
+    return Path(tempfile.mkdtemp(prefix="clean-voice-update-"))
+
+
+def read_status(folder: Path) -> str:
+    """The script's one-word status, or "" when there is none yet (or it can't be read)."""
+    try:
+        return (folder / "status").read_text(encoding="ascii", errors="replace").strip()
+    except OSError:
+        return ""

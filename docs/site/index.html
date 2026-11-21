@@ -31,23 +31,82 @@
       <p class="tagline">Sound clear on your podcast. Clean Voice is a free app that cleans up your microphone, so the
         host hears your voice, not your room.</p>
 
-      <div class="downloads">
-        <a class="download" data-os-target="windows" data-link="windows"
-           href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-Windows.msi">
-          <span class="label">Download for Windows</span>
-          <span class="sub">Windows 10 or 11</span>
-        </a>
-        <a class="download" data-os-target="mac" data-link="mac"
-           href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-macOS.dmg">
-          <span class="label">Download for Mac</span>
-          <span class="sub">macOS 13 or later, Apple Silicon and Intel</span>
-        </a>
+      <!-- B019: two ways to install, the installer first and the command second (neither is marked as the better one).
+           download.js shows the block for the visitor's computer (data-os) and builds each link and command from the
+           page's own address; without JavaScript both blocks are shown, as written here (the fallback repo). -->
+      <div class="ways">
+        <div class="os-block" data-os-target="windows">
+          <section class="way" aria-labelledby="way1-windows">
+            <h2 id="way1-windows">Way 1: download the installer</h2>
+            <div class="note note-warn">
+              <svg class="note-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M12 2.5 1.8 20.5h20.4L12 2.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 9.5v5.2M12 17.6v.1" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+              <div>
+                <h3>First, turn off Smart App Control</h3>
+                <p>Clean Voice is safe, free, and its code is public. Windows blocks it only because it isn't signed.
+                  Signing costs a monthly fee to Microsoft, which this free app doesn't pay.</p>
+                <p>Open Start, then Windows Security, then App and browser control, then Smart App Control settings,
+                  and choose Off. If Windows shows “Windows protected your PC”, click <em>More info</em>, then
+                  <em>Run anyway</em>.</p>
+              </div>
+            </div>
+            <a class="download" data-link="windows" href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-Windows.msi">
+              <span class="label">Download for Windows</span>
+              <span class="sub">Windows 10 or 11</span>
+            </a>
+          </section>
+          <p class="divider" role="separator"><span>or</span></p>
+          <section class="way" aria-labelledby="way2-windows">
+            <h2 id="way2-windows">Way 2: install with one command</h2>
+            <div class="command-box">
+              <code class="command" data-command="windows">irm https://github.com/paulcaesarflores/clean-voice/releases/latest/download/install.ps1 | iex</code>
+              <button class="copy" type="button" data-copy="windows">Copy</button>
+            </div>
+            <ol class="install-steps">
+              <li>Click Copy.</li>
+              <li>Right-click the Start button and choose Terminal.</li>
+              <li>Paste with Ctrl+V and press Enter. It takes about 10 minutes, then Clean Voice opens.</li>
+            </ol>
+            <p class="retry">If it stops, run the same command again.</p>
+          </section>
+        </div>
+        <div class="os-block" data-os-target="mac">
+          <section class="way" aria-labelledby="way1-mac">
+            <h2 id="way1-mac">Way 1: download the installer</h2>
+            <div class="note">
+              <div>
+                <h3>If your Mac says it can't open Clean Voice</h3>
+                <p>Clean Voice is free and not signed with a paid certificate. Open System Settings → Privacy &amp;
+                  Security, scroll down and click <em>Open Anyway</em>.</p>
+              </div>
+            </div>
+            <a class="download" data-link="mac" href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-macOS.dmg">
+              <span class="label">Download for Mac</span>
+              <span class="sub">macOS 13 or later, Apple Silicon and Intel</span>
+            </a>
+          </section>
+          <p class="divider" role="separator"><span>or</span></p>
+          <section class="way" aria-labelledby="way2-mac">
+            <h2 id="way2-mac">Way 2: install with one command</h2>
+            <div class="command-box">
+              <code class="command" data-command="mac">curl -fsSL https://github.com/paulcaesarflores/clean-voice/releases/latest/download/install.sh | bash</code>
+              <button class="copy" type="button" data-copy="mac">Copy</button>
+            </div>
+            <ol class="install-steps">
+              <li>Click Copy.</li>
+              <li>Open Terminal: Applications → Utilities → Terminal.</li>
+              <li>Paste with Cmd+V and press Enter. It takes about 10 minutes, then Clean Voice opens.</li>
+            </ol>
+            <p class="retry">If it stops, run the same command again.</p>
+          </section>
+        </div>
       </div>
-      <p class="other-os" data-for="windows">On a Mac? <a data-link="mac"
-        href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-macOS.dmg">Download for Mac</a></p>
-      <p class="other-os" data-for="mac">On Windows? <a data-link="windows"
-        href="https://github.com/paulcaesarflores/clean-voice/releases/latest/download/Clean-Voice-Windows.msi">Download for Windows</a></p>
+      <p class="other-os" data-for="windows">On a Mac? <a href="#way1-mac" data-show="mac">Show the Mac options</a></p>
+      <p class="other-os" data-for="mac">On Windows? <a href="#way1-windows" data-show="windows">Show the Windows
+        options</a></p>
       <p class="any-os">Clean Voice runs on Windows and Mac computers.</p>
+      <p class="what">The command builds Clean Voice on your computer. Besides Clean Voice's own files from GitHub, it
+        downloads Python packages from PyPI, Briefcase's build template and tools from BeeWare's GitHub, uv from Astral's
+        GitHub and, on Windows, MinGit from Git for Windows' GitHub, each by an exact version.</p>
     </header>
 
     <section class="setup" aria-labelledby="setup-title">
@@ -60,7 +119,8 @@
         </li>
         <li>
           <h3>Install and open Clean Voice</h3>
-          <p>Open the file you downloaded and follow the installer. Then open Clean Voice and pick your microphone.</p>
+          <p>Install Clean Voice one of the two ways above: the installer, or the command. Then open it and pick
+            your microphone.</p>
         </li>
         <li id="step-cable">
           <!-- download.js names the one for the visitor's computer (data-cable). -->

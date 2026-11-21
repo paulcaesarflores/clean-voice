@@ -31,6 +31,9 @@
   --on-signal: #15212B; /* ink: 4.58:1 on the green (white was 3.57:1) */
   --on-desk: #FFFFFF;
   --hover: #DDE3E8;
+  --warn-bg: #FFF3D6;
+  --warn-rule: #D9A93A;
+  --warn-ink: #7A4B00;
   --headline: "Barlow Semi Condensed", "Segoe UI", system-ui, sans-serif;
   --body: "Barlow", "Segoe UI", system-ui, sans-serif;
   color-scheme: light dark;
@@ -48,6 +51,9 @@
     --on-signal: #11181E; /* 8.63:1 */
     --on-desk: #11181E;
     --hover: #222D36;
+    --warn-bg: #2E2612;
+    --warn-rule: #8A6B1E;
+    --warn-ink: #F2C96B;
   }
 }
 
@@ -133,11 +139,159 @@ h1 {
   font-size: 20px;
 }
 
-.downloads {
+/* B019: two ways, the installer first and the command second. download.js sets data-os; without it both show. */
+.ways {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 16px;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+}
+
+.os-block {
+  width: 100%;
+  max-width: 720px;
+  text-align: left;
+}
+
+html[data-os="windows"] .os-block[data-os-target="mac"],
+html[data-os="mac"] .os-block[data-os-target="windows"] {
+  display: none;
+}
+
+.os-block + .os-block {
+  margin-top: 0;
+}
+
+.way h2 {
+  margin-bottom: 12px;
+  font-size: 28px;
+  text-align: center;
+}
+
+.note {
+  display: flex;
+  gap: 14px;
+  margin: 0 0 18px;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+}
+
+.note h3 {
+  margin-bottom: 6px;
+  font-size: 20px;
+}
+
+.note p {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.note p:last-child {
+  margin-bottom: 0;
+}
+
+.note-warn {
+  background: var(--warn-bg);
+  border-color: var(--warn-rule);
+}
+
+.note-warn .note-icon {
+  flex: none;
+  color: var(--warn-ink);
+}
+
+.note-warn h3 {
+  color: var(--warn-ink);
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 28px 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--rule);
+}
+
+.way .download {
+  margin: 0 auto;
+  max-width: 420px;
+}
+
+.command-box {
+  display: flex;
+  align-items: stretch;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.command {
+  flex: 1;
+  min-width: 0;
+  padding: 16px 18px;
+  font: 400 16px/1.45 ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  user-select: all;
+}
+
+/* The Copy button needs JavaScript, which sets data-os. */
+.copy {
+  display: none;
+  flex: none;
+  min-width: 96px;
+  padding: 0 22px;
+  border: 0;
+  background: var(--desk);
+  color: var(--on-desk);
+  font: 600 18px/1 var(--headline);
+  cursor: pointer;
+}
+
+html[data-os] .copy {
+  display: block;
+}
+
+.copy:hover {
+  filter: brightness(1.08);
+}
+
+.copy:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: -5px;
+}
+
+.install-steps {
+  margin: 18px 0 0;
+  padding-left: 28px;
+}
+
+.install-steps li {
+  margin-bottom: 6px;
+}
+
+.retry {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.what {
+  max-width: 640px;
+  margin: 24px auto 0;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .download {
@@ -165,12 +319,7 @@ h1 {
   opacity: 0.9;
 }
 
-/* Only one button when the visitor's computer is known (download.js sets data-os): bigger, the other one a link. */
-html[data-os="windows"] .download[data-os-target="mac"],
-html[data-os="mac"] .download[data-os-target="windows"] {
-  display: none;
-}
-
+/* Bigger when the visitor's computer is known (download.js sets data-os). */
 html[data-os="windows"] .download,
 html[data-os="mac"] .download {
   min-width: 340px;
@@ -334,6 +483,20 @@ footer {
     width: 100%;
     min-width: 0;
     padding: 16px 20px;
+  }
+
+  .way h2 {
+    font-size: 24px;
+  }
+
+  .command {
+    padding: 12px 14px;
+    font-size: 14px;
+  }
+
+  .copy {
+    min-width: 76px;
+    padding: 0 14px;
   }
 
   .setup,
